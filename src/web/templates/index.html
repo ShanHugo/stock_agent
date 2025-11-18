@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>TW Stock Multi-Agent UI</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <h1>台股多代理 回測與代理互動 (MVP)</h1>
+  <form id="bt-form">
+    <label>Symbol: <input name="symbol" value="2330.TW" /></label>
+    <label>Start: <input name="start" value="2024-05-01" /></label>
+    <label>End: <input name="end" value="2024-05-20" /></label>
+    <label>Lookback: <input name="lookback" type="number" value="5" min="1" /></label>
+    <button type="submit">Run Backtest</button>
+  </form>
+  <pre id="result"></pre>
+  <hr />
+  <section>
+    <h2>研究 / 指標與信號</h2>
+    <form id="research-form" style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">
+      <label>Symbol <input name="symbol" value="2330.TW" /></label>
+      <label>Start <input name="start" value="2024-05-01" /></label>
+      <label>End <input name="end" value="2024-05-20" /></label>
+      <label>Rows <input name="preview_rows" type="number" value="8" min="3" max="60" /></label>
+  <button type="submit">Run Research</button>
+  <label>Lookback <input name="dr_lookback" type="number" value="5" min="1" max="60" /></label>
+  <button type="button" id="btn-data-report">Data Report</button>
+    </form>
+    <div id="research-latest" style="margin-top:.75rem; font-size:.9rem; background:#fff; padding:.75rem; border-radius:6px;"></div>
+    <div id="research-preview" style="margin-top:.5rem; max-height:260px; overflow:auto; background:#fff; padding:.5rem; border-radius:6px; font-size:.75rem;"></div>
+  <div id="data-report-link" style="margin-top:.5rem;"></div>
+  <div id="trades-table" style="margin-top:.5rem;font-size:.75rem;"></div>
+  </section>
+  <hr />
+  <section>
+    <h2>代理對話</h2>
+    <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">
+      <label>Agent:
+        <select id="agent-select"></select>
+      </label>
+      <label style="flex:1">Message:
+        <input id="agent-msg" style="width:100%" placeholder="輸入訊息..." />
+      </label>
+      <button id="send-agent" type="button">Send</button>
+    </div>
+    <div id="chat" style="margin-top:1rem; background:#fff; padding:.75rem; border-radius:8px; max-height:300px; overflow:auto; font-size:.85rem;"></div>
+  </section>
+  <div id="report-link"></div>
+  <script>
+    async function loadAgents(){
+      try {
+        const res = await fetch('/api/agents/list');
+        if(!res.ok) return;
+        const data = await res.json();
+        const sel = document.getElementById('agent-select');
+        sel.innerHTML = '';
+        (data.agents||[]).forEach(a=>{
+          const opt=document.createElement('option');
+          opt.value=a; opt.textContent=a; sel.appendChild(opt);
+        });
+      } catch(e) { console.warn('agent load fail', e); }
+    }
+    loadAgents();
+
+    let currentThread = null;
+    async function sendAgent(){
+      const agent = document.getElementById('agent-select').value;
+      const msgInput = document.getElementById('agent-msg');
+      const message = msgInput.value.trim();
+      if(!message) return;
+      appendChat('user', message);
+      msgInput.value='';
+      const payload = {agent, message};
+      if(currentThread) payload.thread_id = currentThread;
+      const res = await fetch('/api/agents/message', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      const data = await res.json();
+      if(data.thread_id) currentThread = data.thread_id;
+      (data.messages||[]).forEach(m=> appendChat(m.role, m.content));
+    }
+    function appendChat(role, text){
+      const box=document.getElementById('chat');
+      const div=document.createElement('div');
+      div.innerHTML = `<strong>${role}:</strong> ${escapeHtml(text)}`;
+      box.appendChild(div); box.scrollTop=box.scrollHeight;
+    }
+    function escapeHtml(str){
+      return str.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    }
+    document.getElementById('send-agent').addEventListener('click', sendAgent);
+    document.getElementById('agent-msg').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); sendAgent(); }});
+    const form = document.getElementById('bt-form');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const payload = Object.fromEntries(fd.entries());
+      payload.lookback = parseInt(payload.lookback);
+      document.getElementById('result').textContent = 'Running...';
+      const res = await fetch('/api/backtest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)});
+      const data = await res.json();
+      document.getElementById('result').textContent = JSON.stringify(data.metrics, null, 2);
+      const today = new Date().toISOString().slice(0,10).replaceAll('-','');
+      document.getElementById('report-link').innerHTML = `<a target="_blank" href="/report?date=${today}">查看互動報表</a>`;
+    });
+
+    // Research form
+    const rform = document.getElementById('research-form');
+    rform.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(rform);
+      const payload = Object.fromEntries(fd.entries());
+      payload.preview_rows = parseInt(payload.preview_rows);
+      document.getElementById('research-latest').textContent = 'Loading...';
+      document.getElementById('research-preview').textContent = '';
+      const res = await fetch('/api/research', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      const data = await res.json();
+      if(data.latest){
+        document.getElementById('research-latest').innerHTML = `<strong>${data.symbol}</strong> (${data.period.start} → ${data.period.end})<br/>Composite: <b>${data.latest.composite_signal}</b><br/><small>${data.explanation}</small><pre style='margin-top:.5rem;'>${escapeHtml(JSON.stringify(data.latest, null, 2))}</pre>`;
+      }
+      if(data.preview){
+        const rows = data.preview;
+        const cols = Object.keys(rows[0]||{});
+        let html = '<table style="border-collapse:collapse;">';
+        html += '<thead><tr>' + cols.map(c=>`<th style=\"border:1px solid #ccc;padding:2px 4px;\">${c}</th>`).join('') + '</tr></thead>';
+        html += '<tbody>' + rows.map(r=>'<tr>'+cols.map(c=>`<td style=\"border:1px solid #eee;padding:2px 4px;\">${r[c]==null?'':r[c]}</td>`).join('')+'</tr>').join('') + '</tbody>';
+        html += '</table>';
+        document.getElementById('research-preview').innerHTML = html;
+      }
+    });
+
+    document.getElementById('btn-data-report').addEventListener('click', async ()=>{
+      const fd = new FormData(rform);
+      const payload = {symbol: fd.get('symbol'), start: fd.get('start'), end: fd.get('end'), lookback: parseInt(fd.get('dr_lookback')||'5')};
+      document.getElementById('data-report-link').textContent = 'Generating report...';
+      document.getElementById('trades-table').textContent='';
+      const res = await fetch('/api/data_report', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      const data = await res.json();
+      if(data.url){
+        document.getElementById('data-report-link').innerHTML = `<a target="_blank" href="${data.url}">開啟資料分析報表 (lookback=${data.lookback})</a>`;
+      } else if(data.report){
+        const rel = '/' + data.report.replace(/^.*reports\//,'reports/');
+        document.getElementById('data-report-link').innerHTML = `<a target="_blank" href="${rel}">開啟資料分析報表 (lookback=${data.lookback})</a>`;
+      } else {
+        document.getElementById('data-report-link').textContent = '無法生成報表';
+      }
+      if(data.trades){
+        if(!data.trades.length){
+          document.getElementById('trades-table').textContent='(無買賣觸發)';
+        } else {
+          let html='<table style="border-collapse:collapse;"><thead><tr><th style="border:1px solid #ccc;padding:2px 4px;">Type</th><th style="border:1px solid #ccc;padding:2px 4px;">Date</th><th style="border:1px solid #ccc;padding:2px 4px;">Price</th></tr></thead><tbody>';
+          data.trades.forEach(t=>{html+=`<tr><td style="border:1px solid #eee;padding:2px 4px;">${t.type}</td><td style="border:1px solid #eee;padding:2px 4px;">${t.date}</td><td style="border:1px solid #eee;padding:2px 4px;">${t.price.toFixed? t.price.toFixed(2): t.price}</td></tr>`});
+          html+='</tbody></table>';
+          document.getElementById('trades-table').innerHTML=html;
+        }
+      }
+    });
+  </script>
+</body>
+</html>

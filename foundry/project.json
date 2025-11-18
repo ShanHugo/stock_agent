@@ -1,0 +1,14 @@
+{
+  "description": "Azure AI Foundry 台股多代理範例專案（說明性文件）。",
+  "agents": [
+    { "name": "data_qa_agent", "purpose": "資料匯入/品質檢查與特徵驗證" },
+    { "name": "pm_risk_agent", "purpose": "投組與風控規則計算（目標倉位、風險閥值）" },
+    { "name": "execution_agent", "purpose": "下單與執行策略（之後接 OpenAPI/MCP）" }
+  ],
+  "tools": [
+    { "type": "FunctionTool", "id": "local_research_tools" },
+    { "type": "BingGrounding", "id": "bing-grounding", "note": "需在 Foundry 建立資源並連線" },
+    { "type": "OpenAPI", "id": "broker-openapi", "note": "接券商/行情 Swagger" },
+    { "type": "MCP", "id": "market-mcp", "note": "連到自建 MCP 伺服器（行情/下單/風控）" }
+  ]
+}
