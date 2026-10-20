@@ -3,6 +3,32 @@
 在自己電腦上執行：每日 08:30 盤前簡報、14:30 收盤後持股提醒（Discord 推送）、個股研究卡、交易計畫與部位控管。
 摘要使用本機 Ollama，數字全部由 Python 計算。原課程的 Azure AI Foundry 多代理版本保留在 `main` 分支。
 
+### 換到另一台電腦
+
+GitHub 上只有程式碼；下面這些刻意不進 git，需要自己搬（請用隨身碟或私人管道，**不要上傳到 GitHub**）：
+
+| 檔案 | 說明 |
+|---|---|
+| `.env` | Discord webhook 網址（等同密碼） |
+| `portfolio.json` | 你的持股與提醒規則 |
+| `state/`（選用） | 提醒的連續天數、最後檢查日；不搬就從頭記錄 |
+| `data/raw/`（選用） | 歷史資料快取；不搬的話第一次執行研究卡與回測會重新下載（數分鐘到數小時） |
+
+新電腦上的步驟（PowerShell，在專案根目錄）：
+```bash
+git clone https://github.com/ShanHugo/stock_agent.git
+cd stock_agent
+git switch feat/agent-pipeline
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt pytest
+.venv\Scripts\python.exe -m pytest -q
+```
+1. 把 `.env`、`portfolio.json`（以及選用的 `state/`、`data/raw/`）複製到專案根目錄
+2. 選用：安裝 Ollama 並 `ollama pull qwen3.5:9b`
+3. 試跑：`.venv\Scripts\python.exe scripts/morning_brief.py --dry-run`
+4. 建立排程：`powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1`
+5. **在舊電腦停用排程**，避免兩台都推送：`powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -Disable`
+
 ### 1. 安裝
 ```bash
 python -m venv .venv

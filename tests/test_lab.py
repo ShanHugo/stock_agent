@@ -127,5 +127,74 @@ class TestCache(unittest.TestCase):
         self.assertEqual(back.index[0], pd.Timestamp('2024-01-01'))
 
 
+class TestConstituents(unittest.TestCase):
+    HTML = ('<h1>臺灣證券交易所與富時國際有限公司合編之臺灣指數系列成分股定期審核結果</h1><p>2026/09/04 17:00</p>'
+            '<p>富時羅素公布下列有關臺灣50指數、臺灣中型100指數審核結果。相關成分股納入及刪除之變動將自2026年9月18日'
+            '（星期五）交易結束後生效（亦即自2026年9月21日（星期一）起生效）。</p>'
+            '<p>臺灣50指數</p><p>成分股納入：<span>藥華藥(6446)</span>。</p><p>成分股刪除：世芯-KY(3661)。</p>'
+            '<p>候補名單：台塑(1301)、群創(3481)。</p><p>臺灣中型100指數</p><p>成分股納入：晶豪科(3006)。</p>')
+
+    def test_parse(self):
+        from src.app.lab.constituents import parse_announcement
+        a = parse_announcement(self.HTML)
+        self.assertEqual(a['effective'], '2026-09-21')
+        self.assertEqual(a['added'], [('6446', '藥華藥')])
+        self.assertEqual(a['removed'], [('3661', '世芯-KY')])   # 中型100 的納入不會混進來
+
+    def test_no_change_announcement(self):
+        from src.app.lab.constituents import parse_announcement
+        html = self.HTML.replace('成分股納入：<span>藥華藥(6446)</span>。</p><p>成分股刪除：世芯-KY(3661)。', '成分股無增刪。')
+        a = parse_announcement(html)
+        self.assertEqual((a['added'], a['removed']), ([], []))
+
+    def test_membership_walk_back(self):
+        from src.app.lab.constituents import membership_history, members_on
+        changes = [{'effective': '2025-09-22', 'added': [('B', '')], 'removed': [('A', '')]},
+                   {'effective': '2026-09-21', 'added': [('C', '')], 'removed': [('B', '')]}]
+        h = membership_history({'C', 'X'}, changes)
+        self.assertEqual(members_on(h, pd.Timestamp('2026-10-01')), {'C', 'X'})
+        self.assertEqual(members_on(h, pd.Timestamp('2026-01-01')), {'B', 'X'})
+        self.assertEqual(members_on(h, pd.Timestamp('2024-01-01')), {'A', 'X'})
+        self.assertEqual(members_on(h, pd.Timestamp('2025-09-22')), {'B', 'X'})  # 生效日當天起算新名單
+
+
+class TestShortTerm(unittest.TestCase):
+    def test_pipeline_runs_and_finds_planted_signal(self):
+        from src.app.lab.features import raw_panels, cross_section, FEATURES
+        from src.app.lab.shortterm import run_shortterm
+        idx = pd.bdate_range('2018-01-01', '2021-12-31')
+        codes = [f'S{i:02d}' for i in range(20)]
+        rng = np.random.default_rng(1)
+        n = len(idx)
+        # 投信買超（trust）提前一段時間反映未來報酬：模型應該學到正係數、IC > 0
+        drift = rng.normal(0, 0.002, (n, len(codes)))
+        rets = drift + rng.normal(0, 0.01, (n, len(codes)))
+        px = pd.DataFrame(100 * np.cumprod(1 + rets, axis=0), index=idx, columns=codes)
+        px['0050'] = 100 * np.cumprod(1 + rng.normal(0.0003, 0.01, n))
+        fwd_drift = pd.DataFrame(drift, index=idx, columns=codes).rolling(20).sum().shift(-20)
+        trust = (fwd_drift * 1e6 + rng.normal(0, 1e3, (n, len(codes)))).fillna(0)
+        vol = pd.DataFrame(1e6, index=idx, columns=codes)
+        chips = {'foreign': pd.DataFrame(0.0, index=idx, columns=codes), 'trust': trust / 20,
+                 'margin': pd.DataFrame(1000.0, index=idx, columns=codes)}
+        rev = pd.DataFrame(5.0, index=pd.period_range('2017-12', '2021-12', freq='M'), columns=codes)
+        pe = pd.DataFrame(15.0, index=pd.date_range('2017-01-31', '2021-12-31', freq='ME'), columns=codes)
+        ds = make_ds(px, revenue=rev, pe=pe)
+        panels = raw_panels(ds, vol, chips, codes)
+        cs = cross_section(panels, idx[200], codes)
+        self.assertEqual(list(cs.columns), FEATURES + ['fwd'])
+        self.assertTrue((cs[FEATURES].abs() <= 0.5).all().all())
+        r = run_shortterm(panels, px, lambda d: set(codes), train_start='2018-04-01', oos_years=[2020, 2021],
+                          end=idx[-1])
+        self.assertGreater(r.coefs[2021]['trust20'], 0)
+        self.assertGreater(r.ic_mean, 0.05)
+        self.assertEqual(sorted(r.yearly.index), [2020, 2021])
+
+    def test_training_cutoff_has_no_label_leak(self):
+        # 2021 年模型只能用「目標在 2021 年前已實現」的樣本：最後一個樣本日 + 20 個交易日 < 2021-01-01
+        days = pd.bdate_range('2020-01-01', '2021-03-31')
+        cutoff = days[days.searchsorted(pd.Timestamp('2021-01-01')) - 20 - 1]
+        self.assertLess(days[days.get_loc(cutoff) + 20], pd.Timestamp('2021-01-01'))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -60,17 +60,21 @@ def _cache_frame(name: str, loader, refresh: bool = False) -> pd.DataFrame:
     return df
 
 
-def load_prices(codes: list[str], start: str, end: str, refresh: bool = False) -> pd.DataFrame:
+def load_prices(codes: list[str], start: str, end: str, refresh: bool = False, field: str = 'Close') -> pd.DataFrame:
+    """field='Close' 還原收盤價；field='Volume' 成交量（股）。"""
     import yfinance as yf
 
     def load():
         tickers = [f'{c}.TW' for c in codes + [BENCHMARK]]
         raw = yf.download(tickers, start=start, end=end, auto_adjust=True, progress=False, group_by='column')
-        close = raw['Close'] if isinstance(raw.columns, pd.MultiIndex) else raw[['Close']]
+        close = raw[field] if isinstance(raw.columns, pd.MultiIndex) else raw[[field]]
         close.columns = [str(c).replace('.TW', '') for c in close.columns]
         return close.sort_index()
 
-    df = _cache_frame(f'prices_{start}_{end}', load, refresh)
+    import hashlib
+    tag = hashlib.md5(','.join(sorted(codes)).encode()).hexdigest()[:8]  # 股票清單不同就用不同快取
+    name = f'prices_{start}_{end}_{tag}' if field == 'Close' else f'{field.lower()}_{start}_{end}_{tag}'
+    df = _cache_frame(name, load, refresh)
     df.index = pd.to_datetime(df.index).tz_localize(None)
     df.columns = [str(c) for c in df.columns]
     return df
@@ -165,3 +169,18 @@ def build_dataset(codes: list[str], *, start: str = '2015-01-01', today: date | 
     if no_eps:
         notes.append(f'沒有 EPS（金融保險業財報格式不同，第一版未支援）：{no_eps}')
     return Dataset(prices=prices, revenue_yoy=revenue, pe=pe, eps=eps, notes=notes)
+
+
+def load_chips(codes: list[str], days: pd.DatetimeIndex) -> dict[str, pd.DataFrame]:
+    """每日三大法人買賣超（股）與融資餘額（張）。只讀已回補的快取資料，沒有的日子留空。"""
+    fields = {'foreign': {}, 'trust': {}, 'margin': {}}
+    for d in days:
+        inst = rs.institutional_day(d.date())
+        if not inst.empty:
+            sub = inst[inst['code'].isin(codes)].set_index('code')
+            fields['foreign'][d] = sub['foreign']
+            fields['trust'][d] = sub['trust']
+        mg = rs.margin_day(d.date())
+        if not mg.empty:
+            fields['margin'][d] = mg[mg['code'].isin(codes)].set_index('code')['margin_balance']
+    return {k: pd.DataFrame(v).T.reindex(columns=codes).astype(float).sort_index() for k, v in fields.items()}

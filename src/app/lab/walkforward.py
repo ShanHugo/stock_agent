@@ -36,10 +36,13 @@ def _key(p: dict) -> str:
 
 
 def evaluate_family(ds: Dataset, codes: list[str], family: str, *, start: str, oos_years: list[int],
-                    end: pd.Timestamp) -> FamilyResult:
+                    end: pd.Timestamp, universe_fn=None) -> FamilyResult:
+    """universe_fn(d) -> 當日可選的代號集合（時點成分股）；None = 全期間都用 codes。"""
+    universe_fn = universe_fn or (lambda d: set(codes))
     runs = {}
     for params in GRID[family]:
-        sig = BUILDERS[family](ds, codes, **params)
+        raw = BUILDERS[family](ds, codes, **params)
+        sig = (lambda f: (lambda d: [c for c in f(d) if c in universe_fn(d)]))(raw)
         runs[_key(params)] = (params, run_backtest(ds.prices, sig, pd.Timestamp(start), end))
 
     pieces, chosen = [], {}
@@ -52,7 +55,8 @@ def evaluate_family(ds: Dataset, codes: list[str], family: str, *, start: str, o
     oos_start, oos_end = oos.index[0], oos.index[-1]
 
     bench_r = buy_and_hold(ds.prices[BENCHMARK], oos_start, oos_end)
-    ew = run_backtest(ds.prices, lambda d: codes, pd.Timestamp(start), end).returns.loc[oos_start:oos_end]
+    ew = run_backtest(ds.prices, lambda d: [c for c in codes if c in universe_fn(d)], pd.Timestamp(start),
+                      end).returns.loc[oos_start:oos_end]
     m, b, e = metrics(oos), metrics(bench_r), metrics(ew)
 
     reasons = []

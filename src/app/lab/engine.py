@@ -27,12 +27,13 @@ def month_ends(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
 
 
 def run_backtest(prices: pd.DataFrame, signal_fn, start: pd.Timestamp, end: pd.Timestamp,
-                 *, fee=FEE, tax=TAX, slippage=SLIPPAGE) -> BacktestResult:
-    """signal_fn(d) -> 當日收盤後要持有的代號 list（只能用 d 以前的資訊）。"""
+                 *, fee=FEE, tax=TAX, slippage=SLIPPAGE, rebalance_dates=None) -> BacktestResult:
+    """signal_fn(d) -> 當日收盤後要持有的代號 list（只能用 d 以前的資訊）。
+    rebalance_dates 未給時，每月最後一個交易日調整。"""
     px = prices.loc[:end]
     rets = px.pct_change(fill_method=None).fillna(0.0)
     days = px.loc[start:end].index
-    rebal = set(month_ends(days))
+    rebal = set(pd.DatetimeIndex(rebalance_dates)) if rebalance_dates is not None else set(month_ends(days))
     w = pd.Series(0.0, index=px.columns)
     out, wlog, tlog, clog = [], {}, {}, {}
     for d in days:
