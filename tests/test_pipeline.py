@@ -2,7 +2,6 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -11,7 +10,6 @@ from src.app.pipeline import run_pipeline
 from src.app.pipeline.qa import run_quality_checks
 from src.app.pipeline.risk import realized_state
 from src.app.pipeline.execution import run_execution
-from src.app.agents import registry
 
 
 def make_ohlcv(closes, start='2024-01-01'):
@@ -139,41 +137,6 @@ class TestOrchestrator(unittest.TestCase):
         a = run_pipeline(df, '2330', lookback=5, audit_dir=None).summary['stages']
         b = run_pipeline(df, '2330', lookback=5, audit_dir=None).summary['stages']
         self.assertEqual(a, b)
-
-
-class FakeAgentsClient:
-    def __init__(self, existing):
-        self.existing = existing
-        self.created, self.updated = [], []
-
-    def enable_auto_function_calls(self, toolset):
-        pass
-
-    def list_agents(self):
-        return list(self.existing)
-
-    def create_agent(self, model, name, instructions, toolset):
-        self.created.append(name)
-        return SimpleNamespace(id=f'new-{name}', name=name, model=model, instructions=instructions)
-
-    def update_agent(self, agent_id, model, instructions, toolset):
-        self.updated.append(agent_id)
-        return SimpleNamespace(id=agent_id, model=model, instructions=instructions)
-
-
-class TestRegistry(unittest.TestCase):
-    def test_reuses_existing_agents(self):
-        model = registry.settings.model_deployment or 'gpt-4o-mini'
-        name, instr = registry.AGENT_SPECS[0]
-        existing = [
-            SimpleNamespace(id='a1', name=name, model=model, instructions=instr),
-            SimpleNamespace(id='a2', name='pm_risk_agent', model=model, instructions='old'),
-        ]
-        client = FakeAgentsClient(existing)
-        agents = registry.ensure_agents(client)
-        self.assertEqual(agents[name].id, 'a1')
-        self.assertEqual(client.updated, ['a2'])
-        self.assertEqual(client.created, ['execution_agent'])
 
 
 if __name__ == '__main__':

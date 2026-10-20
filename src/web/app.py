@@ -7,10 +7,6 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
-import time
-from typing import Dict, Any, List, Optional
-
-from src.app.agents.registry import ensure_agents, get_client
 
 from src.app.data.fetch import fetch_ohlcv_yf
 from src.app.features.indicators import momentum_signal, sma, rsi, zscore, mean_reversion_signal
@@ -19,9 +15,8 @@ from src.app.backtest.engine import backtest_engine
 from src.app.performance.metrics import basic_report
 from src.app.visual.interactive_report import build_interactive_report
 from src.app.pipeline import run_pipeline
-from src.app.agents.narrator import FoundryNarrator
 
-app = FastAPI(title="TW Stock Multi-Agent UI", version="0.1")
+app = FastAPI(title="TW Stock Research UI", version="0.2")
 base_path = Path(__file__).parent
 templates = Jinja2Templates(directory=str(base_path / 'templates'))
 app.mount('/static', StaticFiles(directory=str(base_path / 'static')), name='static')
@@ -59,43 +54,6 @@ class PipelineRequest(BaseModel):
     lookback: int = 20
     allow_short: bool = False
     capital: float = 1_000_000
-    narrate: bool = False
-
-
-class AgentMessageRequest(BaseModel):
-    agent: str
-    message: str
-    thread_id: Optional[str] = None
-
-
-# --- Agent Client 快取 ---
-AGENT_STATE: Dict[str, Any] = {
-    "agents": None,
-}
-
-
-def _ensure_agent_client():
-    if not AGENT_STATE.get("client"):
-        try:
-            AGENT_STATE["client"] = get_client()
-        except Exception as e:
-            # 不中斷：記錄並回傳 None 供後備使用
-            AGENT_STATE["client"] = None
-            AGENT_STATE["client_error"] = str(e)
-    if not AGENT_STATE.get("agents"):
-        try:
-            if AGENT_STATE["client"] is None:
-                raise RuntimeError(AGENT_STATE.get("client_error", "client unavailable"))
-            AGENT_STATE["agents"] = ensure_agents(AGENT_STATE["client"])
-        except Exception as e:
-            # 後備 mock 代理
-            AGENT_STATE["agents"] = {
-                "data_qa_agent": {"id": "mock-data-qa"},
-                "pm_risk_agent": {"id": "mock-pm-risk"},
-                "execution_agent": {"id": "mock-exec"},
-            }
-            AGENT_STATE["agent_error"] = str(e)
-    return AGENT_STATE["client"], AGENT_STATE["agents"]
 
 
 @app.get('/', response_class=HTMLResponse)
@@ -203,64 +161,13 @@ async def api_data_report_get(symbol: str, start: str, end: str, lookback: int =
     return await api_data_report(req)
 
 
-@app.get('/api/agents/list')
-async def list_agents():
-    client, agents = _ensure_agent_client()
-    resp = {"agents": list(agents.keys())}
-    if client is None:
-        resp["mock"] = True
-        resp["warning"] = AGENT_STATE.get("client_error") or AGENT_STATE.get("agent_error") or "azure agents not configured"
-    return resp
-
-
-@app.post('/api/agents/message')
-async def agent_message(req: AgentMessageRequest):
-    client, agents = _ensure_agent_client()
-    if req.agent not in agents:
-        raise HTTPException(status_code=400, detail=f"未知代理: {req.agent}")
-    # Mock path
-    if client is None:
-        thread_id = req.thread_id or 'mock-thread'
-        mock_reply = f"[mock:{req.agent}] 收到訊息：{req.message[:120]}"  # echo effect
-        return {
-            "thread_id": thread_id,
-            "run_status": "completed",
-            "messages": [
-                {"role": "user", "content": req.message},
-                {"role": req.agent, "content": mock_reply}
-            ]
-        }
-    # 真實 Azure Agents 流程（azure-ai-agents 1.x API）
-    from azure.ai.agents.models import MessageRole
-    thread_id = req.thread_id or client.threads.create().id
-    client.messages.create(thread_id=thread_id, role=MessageRole.USER, content=req.message)
-    run = client.runs.create_and_process(thread_id=thread_id, agent_id=agents[req.agent].id)
-    messages: List[Dict[str, Any]] = []
-    for m in client.messages.list(thread_id=thread_id, order='asc'):
-        text = '\n'.join(t.text.value for t in m.text_messages) or '[non-text content]'
-        messages.append({'role': str(m.role), 'content': text})
-    return {"thread_id": thread_id, "run_status": str(run.status), "messages": messages[-25:]}
-
-
 @app.post('/api/pipeline')
 async def api_pipeline(req: PipelineRequest):
-    """Data QA → PM/Risk → Execution（模擬）；narrate=True 時請代理講評。"""
+    """Data QA → PM/Risk → Execution（模擬）。"""
     df = fetch_ohlcv_yf(req.symbol, req.start, req.end)
-    narrator = None
-    warning = None
-    if req.narrate:
-        client, agents = _ensure_agent_client()
-        if client is None:
-            warning = AGENT_STATE.get("client_error") or AGENT_STATE.get("agent_error")
-        else:
-            narrator = FoundryNarrator(client, agents)
     result = run_pipeline(df, req.symbol.replace('.TW', ''), strategy=req.strategy, lookback=req.lookback,
-                          long_only=not req.allow_short, capital=req.capital, expected_end=req.end,
-                          narrator=narrator)
-    resp = {**result.summary, "audit_path": str(result.audit_path)}
-    if warning:
-        resp["narration_warning"] = warning
-    return resp
+                          long_only=not req.allow_short, capital=req.capital, expected_end=req.end)
+    return {**result.summary, "audit_path": str(result.audit_path)}
 
 
 @app.get('/api/health')

@@ -1,5 +1,5 @@
 """每日例行：抓取資料 -> Data QA -> PM/Risk -> Execution（模擬）-> 稽核紀錄 + 圖表
-若本地有 sample_data.csv 亦可改為讀檔。加 --narrate 會請 Foundry 代理對每個階段寫講評。
+若本地有 sample_data.csv 亦可改為讀檔。
 """
 from pathlib import Path
 import sys, pathlib, argparse
@@ -73,7 +73,7 @@ def validate_date_range(df: pd.DataFrame, symbol: str, start: str, end: str, sou
     return df
 
 def main(symbol: str | None = None, start: str | None = None, end: str | None = None, source: str = 'yf', ignore_local: bool = False, lookback: int = 20,
-         strategy: str = 'momentum', allow_short: bool = False, capital: float = 1_000_000, narrate: bool = False):
+         strategy: str = 'momentum', allow_short: bool = False, capital: float = 1_000_000):
     symbol = symbol or '2330'
     start = start or '2024-01-01'
     end = end or datetime.now().strftime('%Y-%m-%d')
@@ -82,16 +82,8 @@ def main(symbol: str | None = None, start: str | None = None, end: str | None = 
     if not used_local:
         df = validate_date_range(df, symbol, start, end, source)
 
-    narrator = None
-    if narrate:
-        try:
-            from src.app.agents.narrator import FoundryNarrator
-            narrator = FoundryNarrator.from_settings()
-        except Exception as e:
-            print(f"[warn] 無法連線 Foundry 代理，略過講評：{e}")
-
     result = run_pipeline(df, symbol, strategy=strategy, lookback=lookback, long_only=not allow_short,
-                          capital=capital, expected_end=None if used_local else end, narrator=narrator)
+                          capital=capital, expected_end=None if used_local else end)
     s = result.summary
     qa = s['stages']['data_qa']
     print('=== Daily Pipeline ===')
@@ -130,7 +122,6 @@ if __name__ == '__main__':
     parser.add_argument('--strategy', default='momentum', choices=['momentum', 'mean_reversion'], help='策略')
     parser.add_argument('--allow-short', action='store_true', help='允許空方部位（預設只做多）')
     parser.add_argument('--capital', type=float, default=1_000_000, help='模擬帳戶資金（台幣）')
-    parser.add_argument('--narrate', action='store_true', help='請 Foundry 代理對每個階段寫講評')
     args = parser.parse_args()
     main(symbol=args.symbol, start=args.start, end=args.end, source=args.source, ignore_local=args.ignore_local, lookback=args.lookback,
-         strategy=args.strategy, allow_short=args.allow_short, capital=args.capital, narrate=args.narrate)
+         strategy=args.strategy, allow_short=args.allow_short, capital=args.capital)

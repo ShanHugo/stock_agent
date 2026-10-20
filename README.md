@@ -1,6 +1,7 @@
-# README.md
+# 台股持股提醒與研究系統（地端）
 
-## 台股多代理（Multi-Agent）研究與交易系統
+在自己電腦上執行：每日 08:30 盤前簡報、14:30 收盤後持股提醒（Discord 推送）、個股研究卡、交易計畫與部位控管。
+摘要使用本機 Ollama，數字全部由 Python 計算。原課程的 Azure AI Foundry 多代理版本保留在 `main` 分支。
 
 ### 1. 安裝
 ```bash
@@ -10,28 +11,24 @@ pip install -r requirements.txt
 ```
 
 ### 2. 設定
-- 複製 `.env.example` 為 `.env` 並填入 Azure/Foundry 相關參數
+- 複製 `.env.example` 為 `.env`，填入 `DISCORD_WEBHOOK_URL`（Discord 頻道 → 整合 → Webhook）
+- 複製 `portfolio.example.json` 為 `portfolio.json`，填入持股與提醒規則
+- 選用：安裝 [Ollama](https://ollama.com) 並下載 `OLLAMA_MODEL`（預設 `qwen3.5:9b`）以產生一句摘要
 
-### 3. 建立代理
-```bash
-python scripts/bootstrap_foundry.py
-```
-
-### 4. 執行每日例行流程
+### 3. 執行每日例行流程
 ```bash
 python src/app/ops/run_daily.py                       # 有 sample_data.csv 時讀本地檔
 python src/app/ops/run_daily.py --ignore-local --start 2025-01-01
-python src/app/ops/run_daily.py --ignore-local --narrate   # 請 Foundry 代理講評
 ```
 
 流程：**Data QA → PM/Risk → Execution（模擬）→ 稽核紀錄**（`src/app/pipeline/`）
-- 所有判斷與數字都由 Python 規則算出；代理（`--narrate`）只負責講評，講評失敗不影響結果。
+- 所有判斷與數字都由 Python 規則算出。
 - Data QA 有 FAIL 時停止；Kill-Switch 觸發時 Execution 停止新單。
 - 預設只做多（台股放空需融券），`--allow-short` 允許空方；`--strategy mean_reversion` 切換策略。
-- 每次執行寫一份稽核 JSON：`reports/<日期>/pipeline_<代號>_<時間>.json`（參數、資料指紋、各階段結果、講評）。
+- 每次執行寫一份稽核 JSON：`reports/<日期>/pipeline_<代號>_<時間>.json`（參數、資料指紋、各階段結果）。
 - 網頁介面（`python -m src.web.app`）也有「每日流程」區塊，對應 `POST /api/pipeline`。
 
-### 5. 持股提醒（Discord）
+### 4. 持股提醒（Discord）
 支援台股（上市/上櫃，含零股）與美股（含碎股，例如複委託 VOO）。三種提醒，門檻都由你在 `portfolio.json` 設定：
 - **停損 / 停利 / 移動停損**：觸發時附賣出股數與預估損益（台股 ETF 證交稅 0.1%、股票 0.3%，美股無證交稅）。
 - **從高點回落**：從近一年高點回落超過你設的幅度（例如 10%、20%），每跨過一個更深的門檻通知一次。
@@ -56,7 +53,7 @@ python scripts/check_alerts.py             # 推送
   或把「接近」寫成「觸發」時會整段捨棄。加 `--no-narrate` 可關閉。
 - 提醒依你自己設定的規則產生，非投資建議；是否下單請自行決定。
 
-### 6. 個股交易計畫與部位控管
+### 5. 個股交易計畫與部位控管
 操作個股（非 ETF）時，系統要求先寫計畫，並依你在 `portfolio.json` 的 `"risk"` 設定算出最多能買幾股：
 ```json
 "risk": {"capital": 500000, "max_risk_per_trade": 0.01, "max_position_pct": 0.2, "max_total_risk": 0.05}
@@ -79,7 +76,7 @@ python scripts/review_trades.py
 - ETF 不需計畫、不受單一持股上限限制；台股 00 開頭自動判定，美股 ETF 請在持股標 `"etf": true`（或買進時加 `--etf`）。
 - 交易日誌記錄 R 倍數（損益 ÷ 初始每股風險）與出場方式，檢討時會標出停損執行偏慢、虧損超過 1R 的交易。
 
-### 7. 個股研究卡（上市公司）
+### 6. 個股研究卡（上市公司）
 把月營收、季度獲利、估值位置、法人與融資、價格位置整理成一張卡，只陳述數據、不給買賣結論：
 ```bash
 python scripts/research_card.py 2330 2317
@@ -91,7 +88,7 @@ python scripts/research_card.py 2330 --send     # 推送到 Discord
 - 季度數字由累計財報相減得出單季；金融、保險業格式不同，第一版不支援。上櫃公司尚未支援。
 - 每日檢查會在觀察清單與持有個股公布新月營收時通知（第一次執行只記錄，不通知）。
 
-### 8. 測試
+### 7. 測試
 - 以 `sample_data.csv` 驗證端到端流程
 
 ---
