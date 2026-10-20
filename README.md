@@ -31,7 +31,22 @@ python src/app/ops/run_daily.py --ignore-local --narrate   # 請 Foundry 代理�
 - 每次執行寫一份稽核 JSON：`reports/<日期>/pipeline_<代號>_<時間>.json`（參數、資料指紋、各階段結果、講評）。
 - 網頁介面（`python -m src.web.app`）也有「每日流程」區塊，對應 `POST /api/pipeline`。
 
-### 5. 測試
+### 5. 持股停損/停利提醒（Discord）
+1. 複製 `portfolio.example.json` 為 `portfolio.json`，填入你的實際持股、成本與停損/停利規則
+   （欄位說明見 `src/app/alerts/portfolio.py`）。`portfolio.json` 不會被提交。
+2. Discord 頻道 → 編輯頻道 → 整合 → Webhook → 新增並複製網址，填入 `.env` 的 `DISCORD_WEBHOOK_URL`。
+3. 收盤後（14:00 以後）執行：
+```bash
+python scripts/check_alerts.py --dry-run   # 先看訊息
+python scripts/check_alerts.py             # 推送
+```
+- 只有觸發或接近停損/停利、或資料抓取失敗時才推送；休市日自動略過。
+- 14:00 前執行會忽略當天的盤中價，不把它當收盤價。
+- 選用本機 Ollama（`OLLAMA_MODEL`，預設 `qwen3.5:9b`）寫一句摘要；摘要出現提醒中沒有的數字，
+  或把「接近」寫成「觸發」時會整段捨棄。加 `--no-narrate` 可關閉。
+- 提醒依你自己設定的規則產生，非投資建議；是否下單請自行決定。
+
+### 6. 測試
 - 以 `sample_data.csv` 驗證端到端流程
 
 ---

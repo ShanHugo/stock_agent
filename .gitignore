@@ -20,3 +20,7 @@ data/raw/
 .DS_Store
 .vscode/
 .idea/
+
+# 個人持股與提醒狀態（不要提交）
+portfolio.json
+state/
