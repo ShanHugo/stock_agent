@@ -21,7 +21,7 @@ from src.app.config.settings import settings
 from src.app.data.fetch import fetch_ohlcv_yf
 from src.app.alerts import load_portfolio, run_alerts
 from src.app.alerts.narrate import OllamaNarrator
-from src.app.alerts.notify import send_discord
+from src.app.alerts.notify import send_discord, format_status
 from src.app.research.sources import revenue_history
 
 
@@ -31,6 +31,7 @@ def main() -> int:
     p.add_argument('--dry-run', action='store_true', help='只印出訊息，不推送')
     p.add_argument('--force', action='store_true', help='即使今天沒有收盤資料也判斷並推送')
     p.add_argument('--no-narrate', action='store_true', help='不使用 Ollama 講評')
+    p.add_argument('--test', action='store_true', help='沒有提醒時也推送一則狀態摘要（測試 Discord 設定）')
     args = p.parse_args()
 
     if not pathlib.Path(args.portfolio).exists():
@@ -57,6 +58,9 @@ def main() -> int:
         print(f'[error] {e}')
     if res['narration_error']:
         print(f"[warn] {res['narration_error']}")
+    if args.test and not res['message'] and res['evaluations']:
+        res['message'] = format_status(res['evaluations'], now.date().isoformat())
+        res['skipped'] = None
     if res['skipped']:
         print(f"[skip] {res['skipped']}")
         return 0

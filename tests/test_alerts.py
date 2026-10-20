@@ -296,6 +296,8 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(wrong_trigger_words('台積電觸發停損', has_triggered=True), [])
         self.assertEqual(wrong_trigger_words('0050 尚未觸及停利價 109', has_triggered=False), [])
         self.assertEqual(wrong_trigger_words('0050 尚未觸及停利，台積電已跌破', has_triggered=False), ['跌破'])
+        self.assertEqual(wrong_trigger_words('今日沒有接近或觸發任何規則', has_triggered=False), [])
+        self.assertEqual(wrong_trigger_words('沒有異常，台積電已觸發停損', has_triggered=False), ['觸發'])
 
     def test_chunks_respect_limit(self):
         text = '\n\n'.join(['x' * 900] * 5)

@@ -23,7 +23,8 @@ def _numbers(text: str) -> set[str]:
     return {n.replace(',', '').rstrip('.') for n in _NUM.findall(text)}
 
 
-_NEGATED = re.compile(r'(尚未|還沒|沒有|未)(' + '|'.join(TRIGGER_WORDS) + ')')
+# 否定詞與觸發字眼之間可隔幾個字（例「沒有接近或觸發」），但不跨標點
+_NEGATED = re.compile(r'(尚未|還沒|沒有|未|無)[^，。；、,.;]{0,6}?(' + '|'.join(TRIGGER_WORDS) + ')')
 
 
 def wrong_trigger_words(narration: str, has_triggered: bool) -> list[str]:

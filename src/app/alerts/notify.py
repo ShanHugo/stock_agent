@@ -5,6 +5,7 @@ import requests
 from .rules import STOP_LOSS, TRAILING_STOP, TAKE_PROFIT, NEAR_STOP, NEAR_TARGET, PLAN_INVALID
 
 DISCORD_LIMIT = 2000
+NL = chr(10)
 DISCLAIMER = '_依你設定的規則自動產生，非投資建議；是否下單請自行決定。_'
 
 TITLES = {
@@ -140,6 +141,18 @@ def build_message(alerts: list[dict], streaks: dict, errors: list[str], date: st
         parts.append('**⚠️ 無法判斷**\n' + '\n'.join(f'- {e}' for e in errors))
     parts.append(DISCLAIMER)
     return '\n\n'.join(parts)
+
+
+def format_status(evaluations: list[dict], date: str) -> str:
+    """測試推送用：沒有提醒時列出每檔目前狀態。"""
+    lines = [f'## 測試推送 {date}', '目前沒有觸發任何提醒，以下是各持股狀態：']
+    for ev in evaluations:
+        stop = ''
+        if ev.get('stop_level'):
+            stop = f"，停損價 {_p(ev['stop_level'])}（再跌 {1 - ev['stop_level'] / ev['close']:.1%} 會觸及）"
+        lines.append(f"- {ev['label']}：收盤 {_p(ev['close'])}（{ev['date']}），未實現 {ev['unrealized_pct']:+.1%}{stop}")
+    lines.append('_收到這則訊息代表 Discord 推送設定正常。_')
+    return NL.join(lines)
 
 
 def _chunks(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
