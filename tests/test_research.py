@@ -156,5 +156,21 @@ class TestRunnerRevenueAlerts(unittest.TestCase):
             self.assertIn('（觀察）2026-10', r['message'])
 
 
+class TestRetry(unittest.TestCase):
+    def test_retries_transient_errors_then_succeeds(self):
+        import requests
+        ok = mock.Mock(status_code=200, raise_for_status=lambda: None)
+        calls = [requests.ConnectTimeout('timeout'), ok]
+        with mock.patch.object(sources, 'RETRY_WAITS', (0.01, 0.01)), mock.patch.object(sources, 'MIN_INTERVAL', 0),                 mock.patch.object(sources, 'HOST_INTERVAL', {}),                 mock.patch('requests.get', side_effect=lambda *a, **k: (lambda v: (_ for _ in ()).throw(v) if isinstance(v, Exception) else v)(calls.pop(0))):
+            self.assertIs(sources._get('http://x', host='t'), ok)
+
+    def test_gives_up_after_retries(self):
+        import requests
+        with mock.patch.object(sources, 'RETRY_WAITS', (0.01,)), mock.patch.object(sources, 'MIN_INTERVAL', 0),                 mock.patch.object(sources, 'HOST_INTERVAL', {}),                 mock.patch('requests.get', side_effect=requests.ConnectTimeout('timeout')) as g:
+            with self.assertRaises(requests.ConnectTimeout):
+                sources._get('http://x', host='t')
+            self.assertEqual(g.call_count, 2)
+
+
 if __name__ == '__main__':
     unittest.main()

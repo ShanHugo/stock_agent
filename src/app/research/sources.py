@@ -20,6 +20,8 @@ import requests
 CACHE = Path('data/raw/research')
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) stock-agent research'}
 MIN_INTERVAL = 3.0  # 同一主機兩次請求最少間隔（秒）
+HOST_INTERVAL = {'mopsov': 4.0}  # 公開資訊觀測站較容易逾時，放慢一點
+RETRY_WAITS = (10, 20, 40)       # 網路錯誤或 5xx 時的重試等待（秒）
 _last_call: dict[str, float] = {}
 
 
@@ -28,17 +30,28 @@ class NoData(Exception):
 
 
 def _throttle(host: str) -> None:
-    wait = MIN_INTERVAL - (time.monotonic() - _last_call.get(host, 0))
+    wait = HOST_INTERVAL.get(host, MIN_INTERVAL) - (time.monotonic() - _last_call.get(host, 0))
     if wait > 0:
         time.sleep(wait)
     _last_call[host] = time.monotonic()
 
 
 def _get(url: str, *, params=None, data=None, host: str, encoding: str | None = None) -> requests.Response:
-    _throttle(host)
     fn = requests.post if data is not None else requests.get
-    r = fn(url, params=params, data=data, headers=HEADERS, timeout=30)
-    r.raise_for_status()
+    for attempt, wait in enumerate((0,) + RETRY_WAITS):
+        if wait:
+            time.sleep(wait)
+        _throttle(host)
+        try:
+            r = fn(url, params=params, data=data, headers=HEADERS, timeout=30)
+            if r.status_code >= 500:
+                raise requests.HTTPError(f'{r.status_code} server error', response=r)
+            r.raise_for_status()
+            break
+        except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as e:
+            transient = not isinstance(e, requests.HTTPError) or (e.response is not None and e.response.status_code >= 500)
+            if not transient or attempt == len(RETRY_WAITS):
+                raise
     if encoding:
         r.encoding = encoding
     return r
