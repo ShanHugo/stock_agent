@@ -18,6 +18,8 @@ from src.app.visual.data_report import build_data_report
 from src.app.backtest.engine import backtest_engine
 from src.app.performance.metrics import basic_report
 from src.app.visual.interactive_report import build_interactive_report
+from src.app.pipeline import run_pipeline
+from src.app.agents.narrator import FoundryNarrator
 
 app = FastAPI(title="TW Stock Multi-Agent UI", version="0.1")
 base_path = Path(__file__).parent
@@ -49,6 +51,17 @@ class DataReportRequest(BaseModel):
     lookback: int = 5
 
 
+class PipelineRequest(BaseModel):
+    symbol: str = '2330.TW'
+    start: str = '2025-01-01'
+    end: str = datetime.now().strftime('%Y-%m-%d')
+    strategy: str = 'momentum'
+    lookback: int = 20
+    allow_short: bool = False
+    capital: float = 1_000_000
+    narrate: bool = False
+
+
 class AgentMessageRequest(BaseModel):
     agent: str
     message: str
@@ -71,7 +84,9 @@ def _ensure_agent_client():
             AGENT_STATE["client_error"] = str(e)
     if not AGENT_STATE.get("agents"):
         try:
-            AGENT_STATE["agents"] = ensure_agents()
+            if AGENT_STATE["client"] is None:
+                raise RuntimeError(AGENT_STATE.get("client_error", "client unavailable"))
+            AGENT_STATE["agents"] = ensure_agents(AGENT_STATE["client"])
         except Exception as e:
             # 後備 mock 代理
             AGENT_STATE["agents"] = {
@@ -85,7 +100,7 @@ def _ensure_agent_client():
 
 @app.get('/', response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse('index.html', {"request": request})
+    return templates.TemplateResponse(request, 'index.html')
 
 
 @app.post('/api/backtest')
@@ -215,43 +230,37 @@ async def agent_message(req: AgentMessageRequest):
                 {"role": req.agent, "content": mock_reply}
             ]
         }
-    # 真實 Azure Agents 流程
-    if req.thread_id:
-        thread_id = req.thread_id
-    else:
-        thread = client.create_thread()
-        thread_id = getattr(thread, 'id', thread.get('id','unknown'))
-    client.add_message(thread_id=thread_id, role="user", content=req.message)
-    agent_obj = agents[req.agent]
-    run = client.create_run(thread_id=thread_id, agent_id=getattr(agent_obj, 'id', agent_obj.get('id')))
-    run_id = getattr(run, 'id', run.get('id'))
-    started = time.time()
-    status = getattr(run, 'status', run.get('status','running'))
-    while status not in ("completed", "failed", "cancelled"):
-        if time.time() - started > 30:
-            break
-        time.sleep(1.1)
-        run = client.get_run(thread_id=thread_id, run_id=run_id)
-        status = getattr(run, 'status', run.get('status','unknown'))
-    msgs_resp = client.list_messages(thread_id=thread_id)
+    # 真實 Azure Agents 流程（azure-ai-agents 1.x API）
+    from azure.ai.agents.models import MessageRole
+    thread_id = req.thread_id or client.threads.create().id
+    client.messages.create(thread_id=thread_id, role=MessageRole.USER, content=req.message)
+    run = client.runs.create_and_process(thread_id=thread_id, agent_id=agents[req.agent].id)
     messages: List[Dict[str, Any]] = []
-    for m in getattr(msgs_resp, 'data', msgs_resp if isinstance(msgs_resp, list) else []):
-        role = getattr(m, 'role', m.get('role'))
-        content = getattr(m, 'content', m.get('content'))
-        if isinstance(content, list):
-            texts = []
-            for c in content:
-                if isinstance(c, dict) and c.get('type') == 'output_text':
-                    texts.append(c.get('text',''))
-                elif isinstance(c, dict) and c.get('type') == 'output_image':
-                    texts.append('[image]')
-                elif isinstance(c, dict) and c.get('type') == 'input_text':
-                    texts.append(c.get('text',''))
-            content_str = '\n'.join(texts) if texts else str(content)
+    for m in client.messages.list(thread_id=thread_id, order='asc'):
+        text = '\n'.join(t.text.value for t in m.text_messages) or '[non-text content]'
+        messages.append({'role': str(m.role), 'content': text})
+    return {"thread_id": thread_id, "run_status": str(run.status), "messages": messages[-25:]}
+
+
+@app.post('/api/pipeline')
+async def api_pipeline(req: PipelineRequest):
+    """Data QA → PM/Risk → Execution（模擬）；narrate=True 時請代理講評。"""
+    df = fetch_ohlcv_yf(req.symbol, req.start, req.end)
+    narrator = None
+    warning = None
+    if req.narrate:
+        client, agents = _ensure_agent_client()
+        if client is None:
+            warning = AGENT_STATE.get("client_error") or AGENT_STATE.get("agent_error")
         else:
-            content_str = str(content)
-        messages.append({'role': role, 'content': content_str})
-    return {"thread_id": thread_id, "run_status": status, "messages": messages[-25:]}
+            narrator = FoundryNarrator(client, agents)
+    result = run_pipeline(df, req.symbol.replace('.TW', ''), strategy=req.strategy, lookback=req.lookback,
+                          long_only=not req.allow_short, capital=req.capital, expected_end=req.end,
+                          narrator=narrator)
+    resp = {**result.summary, "audit_path": str(result.audit_path)}
+    if warning:
+        resp["narration_warning"] = warning
+    return resp
 
 
 @app.get('/api/health')
@@ -267,7 +276,7 @@ async def report_page(request: Request, date: str | None = None):
     if not report_file.exists():
         return HTMLResponse(f"<h3>Report not found for {date}</h3>")
     content = report_file.read_text(encoding='utf-8')
-    return templates.TemplateResponse('report_wrapper.html', {"request": request, "embedded_html": content})
+    return templates.TemplateResponse(request, 'report_wrapper.html', {"embedded_html": content})
 
 
 if __name__ == '__main__':

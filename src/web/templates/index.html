@@ -34,6 +34,21 @@
   </section>
   <hr />
   <section>
+    <h2>每日流程（Data QA → PM/Risk → Execution）</h2>
+    <form id="pipeline-form" style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">
+      <label>Symbol <input name="symbol" value="2330.TW" /></label>
+      <label>Start <input name="start" value="2025-01-01" /></label>
+      <label>End <input name="end" id="pl-end" /></label>
+      <label>Strategy <select name="strategy"><option value="momentum">momentum</option><option value="mean_reversion">mean_reversion</option></select></label>
+      <label>Lookback <input name="lookback" type="number" value="20" min="1" /></label>
+      <label><input name="allow_short" type="checkbox" /> 允許放空</label>
+      <label><input name="narrate" type="checkbox" /> 代理講評</label>
+      <button type="submit">Run Pipeline</button>
+    </form>
+    <div id="pipeline-out" style="margin-top:.75rem; background:#fff; padding:.75rem; border-radius:6px; font-size:.85rem;"></div>
+  </section>
+  <hr />
+  <section>
     <h2>代理對話</h2>
     <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">
       <label>Agent:
@@ -101,6 +116,39 @@
       document.getElementById('result').textContent = JSON.stringify(data.metrics, null, 2);
       const today = new Date().toISOString().slice(0,10).replaceAll('-','');
       document.getElementById('report-link').innerHTML = `<a target="_blank" href="/report?date=${today}">查看互動報表</a>`;
+    });
+
+    // Pipeline form
+    document.getElementById('pl-end').value = new Date().toISOString().slice(0,10);
+    const pform = document.getElementById('pipeline-form');
+    pform.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(pform);
+      const payload = {symbol: fd.get('symbol'), start: fd.get('start'), end: fd.get('end'), strategy: fd.get('strategy'),
+        lookback: parseInt(fd.get('lookback')), allow_short: fd.get('allow_short')==='on', narrate: fd.get('narrate')==='on'};
+      const out = document.getElementById('pipeline-out');
+      out.textContent = 'Running...';
+      const res = await fetch('/api/pipeline', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      const d = await res.json();
+      if(!res.ok){ out.textContent = JSON.stringify(d); return; }
+      const st = d.stages || {};
+      let html = `<b>Status: ${escapeHtml(d.status)}</b>`;
+      if(st.data_qa){
+        html += `<p><b>Data QA</b>: ${st.data_qa.status} (${st.data_qa.rows} rows)</p><ul>`;
+        st.data_qa.checks.filter(c=>c.status!=='PASS').forEach(c=> html += `<li>${c.status} ${escapeHtml(c.detail)}</li>`);
+        html += '</ul>';
+      }
+      if(st.pm_risk){
+        const r = st.pm_risk, m = r.metrics;
+        html += `<p><b>PM/Risk</b>: 權重 ${r.current_weight} → ${r.target_weight}｜累積報酬 ${(m.cumulative_return*100).toFixed(2)}%｜Sharpe ${m.sharpe.toFixed(2)}｜MDD ${(m.max_drawdown*100).toFixed(2)}%｜Kill-Switch ${r.kill_switch.halt ? '觸發：'+escapeHtml(r.kill_switch.reasons.join('; ')) : 'OK'}</p>`;
+      }
+      if(st.execution){
+        html += `<p><b>Execution</b>: ${st.execution.status} — ${escapeHtml(st.execution.detail)}</p>`;
+      }
+      Object.entries(d.narrations||{}).forEach(([k,v])=> html += `<p><b>${k} 代理講評</b><br/>${escapeHtml(v)}</p>`);
+      if(d.narration_warning) html += `<p style="color:#a60">代理不可用：${escapeHtml(d.narration_warning)}</p>`;
+      html += `<small>稽核紀錄：${escapeHtml(d.audit_path)}</small>`;
+      out.innerHTML = html;
     });
 
     // Research form
