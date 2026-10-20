@@ -1,0 +1,71 @@
+{
+  "near_threshold": 0.02,
+  "drawdown_window_days": 252,
+  "allocation": {
+    "targets": {
+      "TW": 0.5,
+      "US": 0.5
+    },
+    "threshold": 0.05
+  },
+  "fees": {
+    "TW": {
+      "fee_bps": 2.8
+    },
+    "US": {
+      "fee_bps": 10
+    }
+  },
+  "holdings": [
+    {
+      "symbol": "0050",
+      "name": "元大台灣50",
+      "shares": 300,
+      "cost": 95,
+      "stop_loss_pct": -0.15,
+      "drawdown_alert_pcts": [
+        0.1,
+        0.2
+      ]
+    },
+    {
+      "symbol": "2330",
+      "name": "台積電",
+      "shares": 30,
+      "cost": 2300,
+      "entry_date": "2026-09-01",
+      "take_profit_pct": 0.2,
+      "stop_price": 2150,
+      "plan": {
+        "thesis": "先進製程與先進封裝需求滿載",
+        "invalidation": [
+          {
+            "type": "below_ma",
+            "days": 60
+          }
+        ],
+        "opened": "2026-09-01",
+        "last_reviewed": "2026-10-01",
+        "initial_risk_per_share": 150
+      }
+    },
+    {
+      "symbol": "VOO",
+      "name": "先鋒標普500",
+      "shares": 1.5,
+      "cost": 650,
+      "drawdown_alert_pcts": [
+        0.1,
+        0.2
+      ],
+      "etf": true
+    }
+  ],
+  "risk": {
+    "capital": 500000,
+    "max_risk_per_trade": 0.01,
+    "max_position_pct": 0.2,
+    "max_total_risk": 0.05,
+    "review_days": 30
+  }
+}

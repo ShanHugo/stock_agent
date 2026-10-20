@@ -7,10 +7,6 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
-import time
-from typing import Dict, Any, List, Optional
-
-from src.app.agents.registry import ensure_agents, get_client
 
 from src.app.data.fetch import fetch_ohlcv_yf
 from src.app.features.indicators import momentum_signal, sma, rsi, zscore, mean_reversion_signal
@@ -18,8 +14,9 @@ from src.app.visual.data_report import build_data_report
 from src.app.backtest.engine import backtest_engine
 from src.app.performance.metrics import basic_report
 from src.app.visual.interactive_report import build_interactive_report
+from src.app.pipeline import run_pipeline
 
-app = FastAPI(title="TW Stock Multi-Agent UI", version="0.1")
+app = FastAPI(title="TW Stock Research UI", version="0.2")
 base_path = Path(__file__).parent
 templates = Jinja2Templates(directory=str(base_path / 'templates'))
 app.mount('/static', StaticFiles(directory=str(base_path / 'static')), name='static')
@@ -49,43 +46,19 @@ class DataReportRequest(BaseModel):
     lookback: int = 5
 
 
-class AgentMessageRequest(BaseModel):
-    agent: str
-    message: str
-    thread_id: Optional[str] = None
-
-
-# --- Agent Client 快取 ---
-AGENT_STATE: Dict[str, Any] = {
-    "agents": None,
-}
-
-
-def _ensure_agent_client():
-    if not AGENT_STATE.get("client"):
-        try:
-            AGENT_STATE["client"] = get_client()
-        except Exception as e:
-            # 不中斷：記錄並回傳 None 供後備使用
-            AGENT_STATE["client"] = None
-            AGENT_STATE["client_error"] = str(e)
-    if not AGENT_STATE.get("agents"):
-        try:
-            AGENT_STATE["agents"] = ensure_agents()
-        except Exception as e:
-            # 後備 mock 代理
-            AGENT_STATE["agents"] = {
-                "data_qa_agent": {"id": "mock-data-qa"},
-                "pm_risk_agent": {"id": "mock-pm-risk"},
-                "execution_agent": {"id": "mock-exec"},
-            }
-            AGENT_STATE["agent_error"] = str(e)
-    return AGENT_STATE["client"], AGENT_STATE["agents"]
+class PipelineRequest(BaseModel):
+    symbol: str = '2330.TW'
+    start: str = '2025-01-01'
+    end: str = datetime.now().strftime('%Y-%m-%d')
+    strategy: str = 'momentum'
+    lookback: int = 20
+    allow_short: bool = False
+    capital: float = 1_000_000
 
 
 @app.get('/', response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse('index.html', {"request": request})
+    return templates.TemplateResponse(request, 'index.html')
 
 
 @app.post('/api/backtest')
@@ -188,70 +161,13 @@ async def api_data_report_get(symbol: str, start: str, end: str, lookback: int =
     return await api_data_report(req)
 
 
-@app.get('/api/agents/list')
-async def list_agents():
-    client, agents = _ensure_agent_client()
-    resp = {"agents": list(agents.keys())}
-    if client is None:
-        resp["mock"] = True
-        resp["warning"] = AGENT_STATE.get("client_error") or AGENT_STATE.get("agent_error") or "azure agents not configured"
-    return resp
-
-
-@app.post('/api/agents/message')
-async def agent_message(req: AgentMessageRequest):
-    client, agents = _ensure_agent_client()
-    if req.agent not in agents:
-        raise HTTPException(status_code=400, detail=f"未知代理: {req.agent}")
-    # Mock path
-    if client is None:
-        thread_id = req.thread_id or 'mock-thread'
-        mock_reply = f"[mock:{req.agent}] 收到訊息：{req.message[:120]}"  # echo effect
-        return {
-            "thread_id": thread_id,
-            "run_status": "completed",
-            "messages": [
-                {"role": "user", "content": req.message},
-                {"role": req.agent, "content": mock_reply}
-            ]
-        }
-    # 真實 Azure Agents 流程
-    if req.thread_id:
-        thread_id = req.thread_id
-    else:
-        thread = client.create_thread()
-        thread_id = getattr(thread, 'id', thread.get('id','unknown'))
-    client.add_message(thread_id=thread_id, role="user", content=req.message)
-    agent_obj = agents[req.agent]
-    run = client.create_run(thread_id=thread_id, agent_id=getattr(agent_obj, 'id', agent_obj.get('id')))
-    run_id = getattr(run, 'id', run.get('id'))
-    started = time.time()
-    status = getattr(run, 'status', run.get('status','running'))
-    while status not in ("completed", "failed", "cancelled"):
-        if time.time() - started > 30:
-            break
-        time.sleep(1.1)
-        run = client.get_run(thread_id=thread_id, run_id=run_id)
-        status = getattr(run, 'status', run.get('status','unknown'))
-    msgs_resp = client.list_messages(thread_id=thread_id)
-    messages: List[Dict[str, Any]] = []
-    for m in getattr(msgs_resp, 'data', msgs_resp if isinstance(msgs_resp, list) else []):
-        role = getattr(m, 'role', m.get('role'))
-        content = getattr(m, 'content', m.get('content'))
-        if isinstance(content, list):
-            texts = []
-            for c in content:
-                if isinstance(c, dict) and c.get('type') == 'output_text':
-                    texts.append(c.get('text',''))
-                elif isinstance(c, dict) and c.get('type') == 'output_image':
-                    texts.append('[image]')
-                elif isinstance(c, dict) and c.get('type') == 'input_text':
-                    texts.append(c.get('text',''))
-            content_str = '\n'.join(texts) if texts else str(content)
-        else:
-            content_str = str(content)
-        messages.append({'role': role, 'content': content_str})
-    return {"thread_id": thread_id, "run_status": status, "messages": messages[-25:]}
+@app.post('/api/pipeline')
+async def api_pipeline(req: PipelineRequest):
+    """Data QA → PM/Risk → Execution（模擬）。"""
+    df = fetch_ohlcv_yf(req.symbol, req.start, req.end)
+    result = run_pipeline(df, req.symbol.replace('.TW', ''), strategy=req.strategy, lookback=req.lookback,
+                          long_only=not req.allow_short, capital=req.capital, expected_end=req.end)
+    return {**result.summary, "audit_path": str(result.audit_path)}
 
 
 @app.get('/api/health')
@@ -267,7 +183,7 @@ async def report_page(request: Request, date: str | None = None):
     if not report_file.exists():
         return HTMLResponse(f"<h3>Report not found for {date}</h3>")
     content = report_file.read_text(encoding='utf-8')
-    return templates.TemplateResponse('report_wrapper.html', {"request": request, "embedded_html": content})
+    return templates.TemplateResponse(request, 'report_wrapper.html', {"embedded_html": content})
 
 
 if __name__ == '__main__':
