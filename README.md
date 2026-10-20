@@ -31,17 +31,27 @@ python src/app/ops/run_daily.py --ignore-local --narrate   # 請 Foundry 代理�
 - 每次執行寫一份稽核 JSON：`reports/<日期>/pipeline_<代號>_<時間>.json`（參數、資料指紋、各階段結果、講評）。
 - 網頁介面（`python -m src.web.app`）也有「每日流程」區塊，對應 `POST /api/pipeline`。
 
-### 5. 持股停損/停利提醒（Discord）
-1. 複製 `portfolio.example.json` 為 `portfolio.json`，填入你的實際持股、成本與停損/停利規則
-   （欄位說明見 `src/app/alerts/portfolio.py`）。`portfolio.json` 不會被提交。
+### 5. 持股提醒（Discord）
+支援台股（上市/上櫃，含零股）與美股（含碎股，例如複委託 VOO）。三種提醒，門檻都由你在 `portfolio.json` 設定：
+- **停損 / 停利 / 移動停損**：觸發時附賣出股數與預估損益（台股 ETF 證交稅 0.1%、股票 0.3%，美股無證交稅）。
+- **從高點回落**：從近一年高點回落超過你設的幅度（例如 10%、20%），每跨過一個更深的門檻通知一次。
+- **配置偏離**：依目標比例（例如台股:美股 = 50:50）偏離超過門檻時通知一次，並算出回到目標需要調整的台幣金額。
+
+設定步驟：
+1. 複製 `portfolio.example.json` 為 `portfolio.json`（欄位說明見 `src/app/alerts/portfolio.py`）。`portfolio.json` 不會被提交。
 2. Discord 頻道 → 編輯頻道 → 整合 → Webhook → 新增並複製網址，填入 `.env` 的 `DISCORD_WEBHOOK_URL`。
-3. 收盤後（14:00 以後）執行：
+3. 定期定額或買賣後記一筆，股數與成交均價會自動更新：
+```bash
+python scripts/record_trade.py buy 0050 12 108.5
+python scripts/record_trade.py buy VOO 0.0712 701.3
+```
+4. 每天台股收盤後（14:00 以後）執行：
 ```bash
 python scripts/check_alerts.py --dry-run   # 先看訊息
 python scripts/check_alerts.py             # 推送
 ```
-- 只有觸發或接近停損/停利、或資料抓取失敗時才推送；休市日自動略過。
-- 14:00 前執行會忽略當天的盤中價，不把它當收盤價。
+- 只在有提醒或資料抓取失敗時推送；沒有新收盤資料（休市、重複執行）時自動略過。
+- 台股 14:00 前、美股紐約 16:30 前，當天的 K 棒只是盤中價，不會拿來判斷。
 - 選用本機 Ollama（`OLLAMA_MODEL`，預設 `qwen3.5:9b`）寫一句摘要；摘要出現提醒中沒有的數字，
   或把「接近」寫成「觸發」時會整段捨棄。加 `--no-narrate` 可關閉。
 - 提醒依你自己設定的規則產生，非投資建議；是否下單請自行決定。

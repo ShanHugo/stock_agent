@@ -20,7 +20,25 @@ def _p(v: float) -> str:
     return f'{v:,.2f}'.rstrip('0').rstrip('.')
 
 
+def _money(v: float, currency: str, signed: bool = False) -> str:
+    if currency == 'USD':
+        return f'{v:+,.2f} USD' if signed else f'{v:,.2f} USD'
+    return f'{v:+,.0f}' if signed else f'{v:,.0f}'
+
+
+def _qty(a: dict, act: dict) -> str:
+    if a['is_us']:
+        return f"{act['qty']:g} 股"
+    s = f"{act['qty']:,.0f} 股"
+    if act['lots']:
+        s += f"（{act['lots']} 張" + (f" + {act['odd_shares']} 股零股" if act['odd_shares'] else '') + '）'
+    else:
+        s += '（零股）'
+    return s
+
+
 def format_alert(a: dict, streak: int = 1) -> str:
+    cur = a['currency']
     lines = [f"**{TITLES[a['kind']]}｜{a['label']}**"
              + (f'（已連續 {streak} 個交易日）' if streak > 1 else '')]
     lines.append(f"收盤 {_p(a['close'])}（{a['date']}），成本 {_p(a['cost'])}，"
@@ -34,24 +52,48 @@ def format_alert(a: dict, streak: int = 1) -> str:
         lines.append(f"停利價 {_p(a['target_level'])}")
     act = a.get('action')
     if act:
-        qty = f"{act['qty']:,} 股"
-        if act['lots']:
-            qty += f"（{act['lots']} 張" + (f" + {act['odd_shares']} 股零股" if act['odd_shares'] else '') + '）'
-        lines.append(f'規則動作：**賣出 {qty}**')
-        lines.append(f"預估成交 {act['est_notional']:,.0f}，手續費+證交稅約 {act['est_fees']:,.0f}，"
-                     f"損益約 {act['est_pnl']:+,.0f}")
+        lines.append(f'規則動作：**賣出 {_qty(a, act)}**')
+        lines.append(f"預估成交 {_money(act['est_notional'], cur)}，手續費+稅約 {_money(act['est_fees'], cur)}，"
+                     f"損益約 {_money(act['est_pnl'], cur, signed=True)}")
+    return '\n'.join(lines)
+
+
+def format_drawdown(d: dict) -> str:
+    return '\n'.join([
+        f"**📉 從高點回落 {d['level']:.0%}｜{d['label']}**",
+        f"收盤 {_p(d['close'])}（{d['date']}），近 {d['window']} 個交易日高點 {_p(d['peak'])}（{d['peak_date']}），"
+        f"目前回落 {d['drawdown']:.1%}",
+        '（僅告知狀況，無對應買賣規則）',
+    ])
+
+
+def format_allocation(al: dict, fx: float | None) -> str:
+    lines = ['**⚖️ 配置偏離**']
+    for g, w in al['weights'].items():
+        lines.append(f"{g}：{w:.1%}（目標 {al['targets'][g]:.0%}，偏離 {al['drift'][g]:+.1%}），"
+                     f"市值 {al['values_twd'][g]:,.0f}")
+    lines.append(f"總市值 {al['total_twd']:,.0f} 台幣" + (f"（美元匯率 {fx:.3f}）" if fx else '')
+                 + f"，門檻 ±{al['threshold']:.0%}")
+    moves = [f"{g} {'增加' if v > 0 else '減少'} {abs(v):,.0f}" for g, v in al['adjust_twd'].items() if abs(v) >= 1]
+    if moves:
+        lines.append('回到目標比例需要：' + '、'.join(moves) + ' 台幣')
     return '\n'.join(lines)
 
 
 def build_message(alerts: list[dict], streaks: dict, errors: list[str], date: str,
-                  narration: str | None = None) -> str | None:
+                  narration: str | None = None, drawdowns: list[dict] | None = None,
+                  allocation: dict | None = None, fx: float | None = None) -> str | None:
     """沒有任何提醒或錯誤時回傳 None（不推送）。"""
-    if not alerts and not errors:
+    drawdowns = drawdowns or []
+    if not alerts and not errors and not drawdowns and not allocation:
         return None
     parts = [f'## 持股提醒 {date}']
     if narration:
         parts.append(f'> {narration}')
     parts += [format_alert(a, streaks.get(a['symbol'], 1)) for a in alerts]
+    parts += [format_drawdown(d) for d in drawdowns]
+    if allocation:
+        parts.append(format_allocation(allocation, fx))
     if errors:
         parts.append('**⚠️ 無法判斷**\n' + '\n'.join(f'- {e}' for e in errors))
     parts.append(DISCLAIMER)

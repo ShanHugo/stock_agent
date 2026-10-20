@@ -38,14 +38,20 @@ def main() -> int:
     narrator = None if args.no_narrate else OllamaNarrator(
         model=os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'), url=os.getenv('OLLAMA_URL', 'http://localhost:11434'))
 
-    now = datetime.now(ZoneInfo('Asia/Taipei')).replace(tzinfo=None)
+    now = datetime.now(ZoneInfo('Asia/Taipei'))
     res = run_alerts(portfolio, fetch_ohlcv_yf, today=now.date(), now=now,
-                     tx_fee_bps=settings.tx_fee_bps, tx_tax_bps=settings.tx_tax_bps,
+                     default_tw_fee_bps=settings.tx_fee_bps,
                      state_path=_ROOT / 'state' / 'alerts_state.json',
                      narrator=narrator, force=args.force)
 
     for ev in res['evaluations']:
-        print(f"[check] {ev['label']:<12} {ev['date']} close={ev['close']:<8} {ev['kind']}")
+        print(f"[check] {ev['label']:<14} {ev['date']} close={ev['close']:<9g} {ev['kind']}")
+    if res.get('allocation'):
+        al = res['allocation']
+        print('[alloc] ' + ', '.join(f"{g} {w:.1%}" for g, w in al['weights'].items())
+              + f"  out_of_band={al['out_of_band']}")
+    for e in res['errors']:
+        print(f'[error] {e}')
     if res['narration_error']:
         print(f"[warn] {res['narration_error']}")
     if res['skipped']:

@@ -1,39 +1,59 @@
-"""每日收盤後的持股檢查：抓資料 → Data QA → 停損/停利判斷 → 組訊息 →（講評）→ 推送。"""
+"""每日持股檢查：抓資料 → Data QA → 停損/停利、回落、配置偏離 → 組訊息 →（講評）→ 交給呼叫端推送。"""
 from __future__ import annotations
 import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from ..pipeline.qa import run_quality_checks
-from .portfolio import Portfolio
-from .rules import evaluate_holding, OK, TRIGGERED
+from .portfolio import Portfolio, Holding
+from .rules import evaluate_holding, drawdown_status, allocation_status, OK, TRIGGERED
 from .notify import build_message
 
 Fetcher = Callable[[str, str, str], pd.DataFrame]
 
-# 13:30 收盤；14:00 前當天的 K 棒可能只是盤中價，不當作收盤價
-CLOSE_CONFIRMED_AT = time(14, 0)
+FX_SYMBOL = 'TWD=X'  # 1 美元 = ? 台幣
+HISTORY_DAYS = 400   # 回落要看近一年高點，多抓一些
+
+# 各市場「當天 K 棒可視為收盤價」的時間（當地時間）；之前的當天 K 棒只是盤中價
+MARKET_CLOSE = {
+    'TW': (ZoneInfo('Asia/Taipei'), time(14, 0)),
+    'TWO': (ZoneInfo('Asia/Taipei'), time(14, 0)),
+    'US': (ZoneInfo('America/New_York'), time(16, 30)),
+}
 
 
-def _load_state(path: Path) -> dict:
+def _load_state(path: Path | None) -> dict:
+    if path is None:
+        return {}
     try:
-        return json.loads(path.read_text(encoding='utf-8'))
+        st = json.loads(path.read_text(encoding='utf-8'))
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+    return st if 'price' in st else {}  # 舊格式直接重置
 
 
-def update_streaks(state: dict, alerts: list[dict]) -> tuple[dict, dict]:
-    """同一檔、同一種提醒連續出現時累計天數；回傳 (新 state, {symbol: streak})。"""
+def drop_unconfirmed_bar(df: pd.DataFrame, market: str, now: datetime | None) -> pd.DataFrame:
+    """若該市場今天還沒收盤，丟掉日期為「當地今天」的 K 棒。now 需帶時區。"""
+    if now is None or df.empty:
+        return df
+    tz, close_at = MARKET_CLOSE[market]
+    local = now.astimezone(tz)
+    if local.time() >= close_at:
+        return df
+    return df[pd.to_datetime(df.index).date < local.date()]
+
+
+def update_streaks(prev: dict, alerts: list[dict]) -> tuple[dict, dict]:
+    """同一檔、同一種停損/停利提醒連續出現時累計天數；回傳 (新 state, {symbol: streak})。"""
     new_state, streaks = {}, {}
     for a in alerts:
-        prev = state.get(a['symbol'])
-        if prev and prev['kind'] == a['kind'] and prev['last_date'] != a['date']:
-            count = prev['count'] + 1
-        elif prev and prev['kind'] == a['kind']:
-            count = prev['count']  # 同一天重跑不累計
+        p = prev.get(a['symbol'])
+        if p and p['kind'] == a['kind']:
+            count = p['count'] + (1 if p['last_date'] != a['date'] else 0)
         else:
             count = 1
         new_state[a['symbol']] = {'kind': a['kind'], 'count': count, 'last_date': a['date']}
@@ -41,68 +61,119 @@ def update_streaks(state: dict, alerts: list[dict]) -> tuple[dict, dict]:
     return new_state, streaks
 
 
+def new_drawdown_alerts(prev: dict, statuses: list[dict]) -> tuple[dict, list[dict]]:
+    """只有跨過比上次更深的門檻才通知；回升到所有門檻之上就重置。"""
+    new_state, alerts = {}, []
+    for d in statuses:
+        if d['level'] is None:
+            continue
+        new_state[d['symbol']] = d['level']
+        if d['level'] > prev.get(d['symbol'], 0):
+            alerts.append(d)
+    return new_state, alerts
+
+
 def run_alerts(
     portfolio: Portfolio,
     fetcher: Fetcher,
     *,
     today: date,
-    tx_fee_bps: float,
-    tx_tax_bps: float,
+    default_tw_fee_bps: float,
     state_path: Path | None = None,
     narrator=None,
     force: bool = False,
     now: datetime | None = None,
 ) -> dict:
-    """回傳 {'skipped', 'message', 'alerts', 'evaluations', 'errors', 'narration_error'}；不負責推送。
+    """回傳 {'skipped', 'message', 'alerts', 'drawdowns', 'allocation', 'evaluations', 'errors', ...}；不負責推送。
 
-    now（台北時間）早於 14:00 時，丟掉日期為今天的 K 棒，避免把盤中價當收盤價。
+    沒有任何持股出現比上次檢查更新的收盤資料時（休市、重複執行）略過，除非 force。
     """
-    drop_today = now is not None and now.date() == today and now.time() < CLOSE_CONFIRMED_AT
+    state = _load_state(state_path)
     errors = list(portfolio.errors)
-    evaluations, latest_dates = [], set()
-    end = today.strftime('%Y-%m-%d')
+    evaluations, dd_statuses, latest = [], [], {}
+    end = (today + timedelta(days=1)).strftime('%Y-%m-%d')
     for h in portfolio.holdings:
-        start = min(pd.to_datetime(h.entry_date).date(), today - timedelta(days=90)).strftime('%Y-%m-%d')
+        start = today - timedelta(days=HISTORY_DAYS)
+        if h.entry_date:
+            start = min(start, pd.to_datetime(h.entry_date).date())
         try:
-            df = fetcher(h.yf_symbol, start, end)
+            df = fetcher(h.yf_symbol, start.strftime('%Y-%m-%d'), end)
         except Exception as e:
             errors.append(f'{h.label}: 抓資料失敗（{e}）')
             continue
-        if drop_today:
-            df = df[pd.to_datetime(df.index).date < today]
+        df = drop_unconfirmed_bar(df, h.market, now)
         qa = run_quality_checks(df, min_rows=5)
         if qa['status'] == 'FAIL':
             bad = '; '.join(c['detail'] for c in qa['checks'] if c['status'] == 'FAIL')
             errors.append(f'{h.label}: 資料異常未判斷（{bad}）')
             continue
-        ev = evaluate_holding(h, df['close'], near_threshold=portfolio.near_threshold,
-                              tx_fee_bps=tx_fee_bps, tx_tax_bps=tx_tax_bps)
+        fee, tax = portfolio.sell_costs_bps(h, default_tw_fee_bps)
+        ev = evaluate_holding(h, df['close'], near_threshold=portfolio.near_threshold, fee_bps=fee, tax_bps=tax)
         evaluations.append(ev)
-        latest_dates.add(ev['date'])
+        latest[h.symbol] = (h, ev)
+        dd = drawdown_status(h, df['close'], portfolio.drawdown_window_days)
+        if dd:
+            dd_statuses.append(dd)
 
-    # 沒有任何一檔有今天的資料 → 視為休市或資料尚未更新，不推送
-    if not force and evaluations and end not in latest_dates:
-        return {'skipped': f'今日 {end} 無收盤資料（休市或尚未更新），最新為 {max(latest_dates)}',
-                'message': None, 'alerts': [], 'evaluations': evaluations, 'errors': errors,
-                'narration_error': None}
+    last_dates = state.get('last_dates', {})
+    has_new = any(ev['date'] > last_dates.get(sym, '') for sym, (_, ev) in latest.items())
+    if not force and latest and not has_new:
+        return {'skipped': '沒有比上次檢查更新的收盤資料（休市或已檢查過）', 'message': None,
+                'alerts': [], 'drawdowns': [], 'allocation': None, 'evaluations': evaluations,
+                'errors': errors, 'narration_error': None}
 
     alerts = sorted([e for e in evaluations if e['kind'] != OK],
                     key=lambda e: (e['kind'] not in TRIGGERED, e['symbol']))
-    state = _load_state(state_path) if state_path else {}
-    new_state, streaks = update_streaks(state, alerts)
+    price_state, streaks = update_streaks(state.get('price', {}), alerts)
+    dd_state, dd_alerts = new_drawdown_alerts(state.get('drawdown', {}), dd_statuses)
 
-    message = build_message(alerts, streaks, errors, end)
+    alloc, alloc_alert, fx = None, None, None
+    if portfolio.allocation and latest:
+        alloc, fx, err = _allocation(portfolio, latest, fetcher, today, end)
+        if err:
+            errors.append(err)
+        elif alloc['out_of_band'] and not state.get('alloc_out'):
+            alloc_alert = alloc  # 從正常變偏離才通知
+
+    def build(narration=None):
+        return build_message(alerts, streaks, errors, today.strftime('%Y-%m-%d'), narration=narration,
+                             drawdowns=dd_alerts, allocation=alloc_alert, fx=fx)
+
+    message = build()
     narration_error = None
-    if message and narrator is not None and alerts:
+    if message and narrator is not None and (alerts or dd_alerts or alloc_alert):
         has_triggered = any(a['kind'] in TRIGGERED for a in alerts)
         narration, narration_error = narrator.summarize(message, has_triggered=has_triggered)
         if narration:
-            message = build_message(alerts, streaks, errors, end, narration=narration)
+            message = build(narration)
 
     if state_path:
+        new_state = {
+            'price': price_state,
+            'drawdown': dd_state,
+            'alloc_out': bool(alloc['out_of_band']) if alloc else state.get('alloc_out', False),
+            'last_dates': {**last_dates, **{sym: ev['date'] for sym, (_, ev) in latest.items()}},
+        }
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(new_state, ensure_ascii=False, indent=2), encoding='utf-8')
 
-    return {'skipped': None, 'message': message, 'alerts': alerts, 'evaluations': evaluations,
-            'errors': errors, 'narration_error': narration_error,
-            'run_at': datetime.now().isoformat(timespec='seconds')}
+    return {'skipped': None, 'message': message, 'alerts': alerts, 'drawdowns': dd_alerts,
+            'allocation': alloc, 'fx': fx, 'evaluations': evaluations, 'errors': errors,
+            'narration_error': narration_error, 'run_at': datetime.now().isoformat(timespec='seconds')}
+
+
+def _allocation(portfolio: Portfolio, latest: dict[str, tuple[Holding, dict]], fetcher: Fetcher,
+                today: date, end: str) -> tuple[dict | None, float | None, str | None]:
+    if len(latest) < len(portfolio.holdings):
+        return None, None, '有持股抓不到價格，略過配置偏離檢查'
+    fx = None
+    if any(h.is_us for h, _ in latest.values()):
+        try:
+            fx_df = fetcher(FX_SYMBOL, (today - timedelta(days=10)).strftime('%Y-%m-%d'), end)
+            fx = float(fx_df['close'].dropna().iloc[-1])
+        except Exception as e:
+            return None, None, f'抓美元匯率失敗（{e}），略過配置偏離檢查'
+    values = {sym: h.shares * ev['close'] * (fx if h.is_us else 1.0) for sym, (h, ev) in latest.items()}
+    groups = {sym: h.alloc_group for sym, (h, _) in latest.items()}
+    a = portfolio.allocation
+    return allocation_status(values, groups, a['targets'], a['threshold']), fx, None
