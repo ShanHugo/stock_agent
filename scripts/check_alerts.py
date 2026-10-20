@@ -15,12 +15,14 @@ from zoneinfo import ZoneInfo
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+os.chdir(_ROOT)  # 排程執行時工作目錄可能不同；快取與 state 以專案根目錄為準
 
 from src.app.config.settings import settings
 from src.app.data.fetch import fetch_ohlcv_yf
 from src.app.alerts import load_portfolio, run_alerts
 from src.app.alerts.narrate import OllamaNarrator
 from src.app.alerts.notify import send_discord
+from src.app.research.sources import revenue_history
 
 
 def main() -> int:
@@ -42,7 +44,8 @@ def main() -> int:
     res = run_alerts(portfolio, fetch_ohlcv_yf, today=now.date(), now=now,
                      default_tw_fee_bps=settings.tx_fee_bps,
                      state_path=_ROOT / 'state' / 'alerts_state.json',
-                     narrator=narrator, force=args.force)
+                     narrator=narrator, force=args.force,
+                     revenue_lookup=lambda code: revenue_history(code, 13, today=now.date()))
 
     for ev in res['evaluations']:
         print(f"[check] {ev['label']:<14} {ev['date']} close={ev['close']:<9g} {ev['kind']}")

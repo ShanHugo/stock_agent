@@ -103,13 +103,25 @@ def format_reviews(reviews: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def format_revenues(revs: list[dict]) -> str:
+    lines = ['**📊 月營收公布**']
+    for r in revs:
+        tag = '持有' if r['held'] else '觀察'
+        lines.append(f"- {r['code']} {r['name']}（{tag}）{r['month']}：{r['revenue_yi']:,.1f} 億，"
+                     f"月增 {r['mom_pct']:+.1f}%、年增 {r['yoy_pct']:+.1f}%、累計年增 {r['cum_yoy_pct']:+.1f}%"
+                     + (f"｜{r['note']}" if r['note'] else ''))
+    lines.append('完整數據：`python scripts/research_card.py 代號`')
+    return '\n'.join(lines)
+
+
 def build_message(alerts: list[dict], streaks: dict, errors: list[str], date: str,
                   narration: str | None = None, drawdowns: list[dict] | None = None,
                   allocation: dict | None = None, fx: float | None = None,
-                  risk: dict | None = None, reviews: list[dict] | None = None) -> str | None:
+                  risk: dict | None = None, reviews: list[dict] | None = None,
+                  revenues: list[dict] | None = None) -> str | None:
     """沒有任何提醒或錯誤時回傳 None（不推送）。"""
-    drawdowns, reviews = drawdowns or [], reviews or []
-    if not alerts and not errors and not drawdowns and not allocation and not risk and not reviews:
+    drawdowns, reviews, revenues = drawdowns or [], reviews or [], revenues or []
+    if not any([alerts, errors, drawdowns, allocation, risk, reviews, revenues]):
         return None
     parts = [f'## 持股提醒 {date}']
     if narration:
@@ -122,6 +134,8 @@ def build_message(alerts: list[dict], streaks: dict, errors: list[str], date: st
         parts.append(format_risk(risk))
     if reviews:
         parts.append(format_reviews(reviews))
+    if revenues:
+        parts.append(format_revenues(revenues))
     if errors:
         parts.append('**⚠️ 無法判斷**\n' + '\n'.join(f'- {e}' for e in errors))
     parts.append(DISCLAIMER)

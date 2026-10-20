@@ -25,6 +25,7 @@
   allocation             {"targets": {"TW": 0.5, "US": 0.5}, "threshold": 0.05}
   fees                   覆寫賣出費用（bps），例 {"TW": {"fee_bps": 2.8}, "US": {"fee_bps": 10}}
   risk                   部位控管參數（見 plans.py）
+  watchlist              觀察中的上市個股代號，例 ["2317", "2454"]（研究卡與月營收公布提醒）
 """
 from __future__ import annotations
 import json
@@ -118,6 +119,7 @@ class Portfolio:
     allocation: dict | None = None
     fees: dict = field(default_factory=dict)
     risk: dict | None = None
+    watchlist: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def buy_fee_bps(self, h: Holding, default_tw_fee_bps: float) -> float:
@@ -175,8 +177,13 @@ def holding_from_dict(item: dict) -> tuple[Holding | None, list[str]]:
     known = set(Holding.__dataclass_fields__)
     errs = []
     unknown = set(item) - known
-    if unknown:
-        errs.append(f"{item.get('symbol', '?')}: 未知欄位 {sorted(unknown)}")
+    sym = item.get('symbol', '?')
+    # 整體設定誤放進單一持股時，直接說明正確位置
+    misplaced = unknown & {'risk', 'allocation', 'fees', 'near_threshold', 'drawdown_window_days', 'watchlist'}
+    for k in sorted(misplaced):
+        errs.append(f'{sym}: "{k}" 是整體設定，請移到 portfolio.json 最外層（與 "holdings" 同一層）')
+    if unknown - misplaced:
+        errs.append(f"{sym}: 未知欄位 {sorted(unknown - misplaced)}")
     h = Holding(**{k: v for k, v in item.items() if k in known})
     h.symbol = str(h.symbol).strip()
     h.shares = float(h.shares)
@@ -201,5 +208,6 @@ def load_portfolio(path: str | Path) -> Portfolio:
         allocation=alloc if alloc and not any(e.startswith('allocation') for e in errors) else None,
         fees=raw.get('fees', {}),
         risk=raw.get('risk'),
+        watchlist=[str(x) for x in raw.get('watchlist', [])],
         errors=errors,
     )

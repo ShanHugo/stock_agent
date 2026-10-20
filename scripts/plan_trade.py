@@ -9,7 +9,8 @@
   python scripts/plan_trade.py cancel <計畫ID>
   python scripts/plan_trade.py review 2330          # 確認持股的買進理由仍成立
 
-失效條件格式：close_below:價格、below_ma:天數、time_stop:天數:最低報酬（例 time_stop:40:0.05）
+失效條件格式：close_below:價格、below_ma:天數、time_stop:天數:最低報酬（例 time_stop:40:0.05）、
+            revenue_yoy_below:年增率門檻%:連續月數（例 revenue_yoy_below:0:2 = 連續 2 個月營收年減）
 """
 from __future__ import annotations
 import argparse, json, sys, pathlib
@@ -37,6 +38,8 @@ def parse_invalid(spec: str) -> dict:
             return {'type': t, 'days': int(parts[1])}
         if t == 'time_stop':
             return {'type': t, 'days': int(parts[1]), 'min_gain': float(parts[2])}
+        if t == 'revenue_yoy_below':
+            return {'type': t, 'threshold': float(parts[1]), 'months': int(parts[2])}
     except (IndexError, ValueError):
         pass
     raise argparse.ArgumentTypeError(f'失效條件格式錯誤：{spec}')

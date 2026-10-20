@@ -11,10 +11,11 @@ import pandas as pd
 from ..pipeline.qa import run_quality_checks
 from .portfolio import Portfolio, Holding
 from .rules import evaluate_holding, drawdown_status, allocation_status, OK, TRIGGERED
-from .plans import check_invalidation, thesis_review_due, portfolio_risk, validate_risk
+from .plans import check_invalidation, thesis_review_due, portfolio_risk, validate_risk, FUNDAMENTAL_TYPES
 from .notify import build_message
 
 Fetcher = Callable[[str, str, str], pd.DataFrame]
+RevenueLookup = Callable[[str], pd.DataFrame]  # 代號 → 月營收歷史（index=YYYY-MM）
 
 FX_SYMBOL = 'TWD=X'  # 1 美元 = ? 台幣
 HISTORY_DAYS = 400   # 回落要看近一年高點，多抓一些
@@ -90,6 +91,7 @@ def run_alerts(
     narrator=None,
     force: bool = False,
     now: datetime | None = None,
+    revenue_lookup: RevenueLookup | None = None,
 ) -> dict:
     """回傳 {'skipped', 'message', 'alerts', 'drawdowns', 'allocation', 'risk', 'evaluations', 'errors', ...}；不負責推送。
 
@@ -117,7 +119,10 @@ def run_alerts(
         fee, tax = portfolio.sell_costs_bps(h, default_tw_fee_bps)
         ev = evaluate_holding(h, df['close'], near_threshold=portfolio.near_threshold, fee_bps=fee, tax_bps=tax)
         if ev['kind'] not in TRIGGERED and h.plan:
-            hits = check_invalidation(h, df['close'], today)
+            revenue = None
+            if any(r['type'] in FUNDAMENTAL_TYPES for r in h.plan.get('invalidation', [])):
+                revenue = _revenue(revenue_lookup, h.symbol, h.market, errors)
+            hits = check_invalidation(h, df['close'], today, revenue=revenue)
             if hits:
                 ev = _as_plan_invalid(ev, h, hits, fee, tax)
         evaluations.append(ev)
@@ -172,6 +177,25 @@ def run_alerts(
                 risk_alert = risk  # 出現新的超限項目才通知
             risk_flags = new_flags
 
+    # 月營收公布：觀察清單 + 持有的上市個股；第一次只記錄、不通知
+    revenues, revenue_seen = [], dict(state.get('revenue_seen', {}))
+    if revenue_lookup:
+        codes = list(dict.fromkeys(portfolio.watchlist + [h.symbol for h in portfolio.holdings
+                                                          if h.market == 'TW' and not h.is_etf]))
+        for code in codes:
+            hist = _revenue(revenue_lookup, code, 'TW', errors)
+            if hist is None or hist.empty:
+                continue
+            month = hist.index[-1]
+            if revenue_seen.get(code) and month > revenue_seen[code]:
+                last = hist.iloc[-1]
+                revenues.append({'code': code, 'name': last.get('name', ''), 'month': month,
+                                 'revenue_yi': last['revenue'] / 1e5, 'mom_pct': last['mom_pct'],
+                                 'yoy_pct': last['yoy_pct'], 'cum_yoy_pct': last['cum_yoy_pct'],
+                                 'note': last.get('note') or '',
+                                 'held': any(h.symbol == code for h in portfolio.holdings)})
+            revenue_seen[code] = month
+
     reviews, reminded = [], dict(state.get('review_reminded', {}))
     review_days = (portfolio.risk or {}).get('review_days', 30)
     for h, ev in latest.values():
@@ -185,7 +209,8 @@ def run_alerts(
 
     def build(narration=None):
         return build_message(alerts, streaks, errors, today.strftime('%Y-%m-%d'), narration=narration,
-                             drawdowns=dd_alerts, allocation=alloc_alert, fx=fx, risk=risk_alert, reviews=reviews)
+                             drawdowns=dd_alerts, allocation=alloc_alert, fx=fx, risk=risk_alert, reviews=reviews,
+                             revenues=revenues)
 
     message = build()
     narration_error = None
@@ -202,15 +227,29 @@ def run_alerts(
             'alloc_out': bool(alloc['out_of_band']) if alloc else state.get('alloc_out', False),
             'risk_flags': risk_flags,
             'review_reminded': reminded,
+            'revenue_seen': revenue_seen,
             'last_dates': {**last_dates, **{sym: ev['date'] for sym, (_, ev) in latest.items()}},
         }
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(new_state, ensure_ascii=False, indent=2), encoding='utf-8')
 
     return {'skipped': None, 'message': message, 'alerts': alerts, 'drawdowns': dd_alerts,
-            'allocation': alloc, 'risk': risk, 'reviews': reviews, 'fx': fx, 'evaluations': evaluations,
+            'allocation': alloc, 'risk': risk, 'reviews': reviews, 'revenues': revenues, 'fx': fx, 'evaluations': evaluations,
             'errors': errors, 'narration_error': narration_error,
             'run_at': datetime.now().isoformat(timespec='seconds')}
+
+
+def _revenue(lookup: RevenueLookup | None, code: str, market: str, errors: list[str]) -> pd.DataFrame | None:
+    if lookup is None:
+        return None
+    if market != 'TW':
+        errors.append(f'{code}: 月營收目前只支援上市公司，略過營收相關檢查')
+        return None
+    try:
+        return lookup(code)
+    except Exception as e:
+        errors.append(f'{code}: 抓月營收失敗（{e}），略過營收相關檢查')
+        return None
 
 
 def _as_plan_invalid(ev: dict, h: Holding, hits: list[str], fee: float, tax: float) -> dict:

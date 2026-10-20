@@ -74,11 +74,24 @@ python scripts/plan_trade.py review 2317      # 理由仍成立時確認
 python scripts/record_trade.py sell 2317 90 260
 python scripts/review_trades.py
 ```
-- 失效條件目前只支援價格/時間：`close_below:價格`、`below_ma:天數`、`time_stop:天數:最低報酬`。
+- 失效條件：`close_below:價格`、`below_ma:天數`、`time_stop:天數:最低報酬`、
+  `revenue_yoy_below:年增率門檻%:連續月數`（例 `revenue_yoy_below:0:2` = 連續 2 個月營收年減）。
 - ETF 不需計畫、不受單一持股上限限制；台股 00 開頭自動判定，美股 ETF 請在持股標 `"etf": true`（或買進時加 `--etf`）。
 - 交易日誌記錄 R 倍數（損益 ÷ 初始每股風險）與出場方式，檢討時會標出停損執行偏慢、虧損超過 1R 的交易。
 
-### 7. 測試
+### 7. 個股研究卡（上市公司）
+把月營收、季度獲利、估值位置、法人與融資、價格位置整理成一張卡，只陳述數據、不給買賣結論：
+```bash
+python scripts/research_card.py 2330 2317
+python scripts/research_card.py --watchlist     # portfolio.json 的 "watchlist" + 持有的個股
+python scripts/research_card.py 2330 --send     # 推送到 Discord
+```
+- 資料來源：公開資訊觀測站（月營收、季度損益）、證交所（本益比/淨值比/殖利率、三大法人、融資融券）、Yahoo Finance（價格）。
+- 每次請求間隔約 3 秒避免被封鎖；第一次查詢一檔約需 2 分鐘回補歷史，之後讀 `data/raw/research/` 快取。
+- 季度數字由累計財報相減得出單季；金融、保險業格式不同，第一版不支援。上櫃公司尚未支援。
+- 每日檢查會在觀察清單與持有個股公布新月營收時通知（第一次執行只記錄，不通知）。
+
+### 8. 測試
 - 以 `sample_data.csv` 驗證端到端流程
 
 ---

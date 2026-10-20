@@ -11,6 +11,7 @@
   {"type": "close_below", "price": 900}           收盤跌破某價位
   {"type": "below_ma", "days": 60}                收盤跌破 N 日均線
   {"type": "time_stop", "days": 40, "min_gain": 0.05}  持有 N 個日曆天仍未漲到 min_gain
+  {"type": "revenue_yoy_below", "threshold": 0, "months": 2}  最近 N 個月營收年增率都低於 threshold（%）
 """
 from __future__ import annotations
 import json
@@ -23,7 +24,8 @@ import pandas as pd
 
 from .portfolio import Holding
 
-INVALIDATION_TYPES = {'close_below', 'below_ma', 'time_stop'}
+INVALIDATION_TYPES = {'close_below', 'below_ma', 'time_stop', 'revenue_yoy_below'}
+FUNDAMENTAL_TYPES = {'revenue_yoy_below'}
 
 
 def validate_risk(risk: dict | None) -> list[str]:
@@ -52,6 +54,8 @@ def validate_invalidation(rules: list[dict]) -> list[str]:
             errs.append('below_ma 需要 days >= 2')
         elif t == 'time_stop' and not (int(r.get('days', 0)) > 0 and 'min_gain' in r):
             errs.append('time_stop 需要 days > 0 與 min_gain')
+        elif t == 'revenue_yoy_below' and not ('threshold' in r and int(r.get('months', 0)) >= 1):
+            errs.append('revenue_yoy_below 需要 threshold 與 months >= 1')
     return errs
 
 
@@ -131,8 +135,9 @@ def new_plan(symbol: str, *, entry: float, stop: float, thesis: str, sizing: dic
 
 # --- 每日檢查用 ---
 
-def check_invalidation(h: Holding, closes: pd.Series, today: date) -> list[str]:
-    """回傳已成立的失效條件說明（空 list = 理由仍成立）。"""
+def check_invalidation(h: Holding, closes: pd.Series, today: date,
+                       revenue: pd.DataFrame | None = None) -> list[str]:
+    """回傳已成立的失效條件說明（空 list = 理由仍成立）。revenue 為月營收歷史（index=YYYY-MM，含 yoy_pct）。"""
     plan = h.plan or {}
     closes = closes.dropna().sort_index()
     close = float(closes.iloc[-1])
@@ -154,6 +159,12 @@ def check_invalidation(h: Holding, closes: pd.Series, today: date) -> list[str]:
                 gain = close / h.cost - 1
                 if held >= int(r['days']) and gain < r['min_gain']:
                     hits.append(f"持有 {held} 天，報酬 {gain:+.1%} 未達 {r['min_gain']:+.0%}")
+        elif t == 'revenue_yoy_below' and revenue is not None and not revenue.empty:
+            n = int(r['months'])
+            recent = revenue['yoy_pct'].iloc[-n:]
+            if len(recent) == n and recent.notna().all() and (recent < r['threshold']).all():
+                detail = '、'.join(f'{m} {v:+.1f}%' for m, v in recent.items())
+                hits.append(f"月營收連續 {n} 個月年增率低於 {r['threshold']:g}%（{detail}）")
     return hits
 
 
