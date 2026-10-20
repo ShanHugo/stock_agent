@@ -7,6 +7,8 @@ import pandas as pd
 
 from src.app.briefing import sources as src
 from src.app.briefing.compose import build_briefing, format_briefing, has_triggered
+from src.app.briefing import news
+from src.app.alerts.notify import _chunks
 from src.app.alerts.portfolio import Holding, Portfolio
 
 TPE = ZoneInfo('Asia/Taipei')
@@ -78,6 +80,62 @@ def prices(sym, start, end):
     return pd.DataFrame({'open': c, 'high': c, 'low': c, 'close': c, 'volume': 1.0})
 
 
+def rss(*items):
+    from xml.sax.saxutils import escape
+    body = ''.join(f'<item><title>{escape(t)}</title><link>{escape(l)}</link><pubDate>{d}</pubDate></item>'
+                   for t, l, d in items)
+    return f'<rss><channel>{body}</channel></rss>'.encode('utf-8')
+
+
+RECENT = 'Thu, 22 Oct 2026 22:00:00 +0000'   # 台北 10/23 06:00
+OLD = 'Mon, 19 Oct 2026 00:00:00 +0000'
+
+
+def fake_feed(url, params=None, source=''):
+    if 'tw.stock.yahoo' in url:
+        return news.parse_feed(rss(('0050 規模創新高', 'https://tw.example/1', RECENT),
+                                   ('台股盤後大跌', 'https://tw.example/2', RECENT)), source)
+    if 'federalreserve' in url:
+        return news.parse_feed(rss(('FOMC statement', 'https://www.federalreserve.gov/newsevents/pressreleases/monetary1.htm', RECENT),
+                                   ('Enforcement action', 'https://www.federalreserve.gov/x/enforcement1.htm', RECENT)), source)
+    if 'cna' in url:
+        return news.parse_feed(rss(('台股期指跌385點', 'https://cna.example/1', RECENT),
+                                   ('舊聞', 'https://cna.example/2', OLD)), source)
+    return news.parse_feed(rss(('S&P 500 edges higher', 'https://us.example/1', RECENT)), source)
+
+
+class TestNews(unittest.TestCase):
+    def test_aliases(self):
+        self.assertEqual(news.aliases('0050', '元大台灣50'), ['0050', '元大台灣50', '台灣50'])
+        self.assertEqual(news.aliases('2317', '鴻海'), ['2317', '鴻海'])   # 不可產生空字串
+        self.assertEqual(news.aliases('00881', ''), ['00881'])
+
+    def test_collect_filters_and_dedupes(self):
+        pf = Portfolio(holdings=[Holding(symbol='0050', name='元大台灣50', shares=1, cost=1),
+                                 Holding(symbol='VOO', shares=1, cost=1, etf=True)])
+        n = news.collect_news(pf, datetime(2026, 10, 23, 8, 30, tzinfo=TPE), [], fetch=fake_feed)
+        self.assertEqual([i['title'] for i in n['stocks'][0]['items']], ['0050 規模創新高'])  # 無關的盤後新聞被濾掉
+        self.assertEqual([i['title'] for i in n['fed']], ['FOMC statement'])                  # 只留貨幣政策
+        self.assertEqual([i['title'] for i in n['tw']], ['台股期指跌385點'])                  # 舊聞被濾掉
+        self.assertEqual(len(n['us']), 1)
+
+    def test_errors_reported(self):
+        errs = []
+
+        def boom(*a, **k):
+            raise ConnectionError('down')
+        n = news.collect_news(Portfolio(holdings=[]), datetime(2026, 10, 23, 8, 30, tzinfo=TPE), errs, fetch=boom)
+        self.assertTrue(errs)
+        self.assertIn('沒有抓到相關新聞', '\n'.join(news.format_news(n, TPE)))
+
+    def test_long_news_block_split_by_line(self):
+        block = '\n'.join(f'- [標題{i}](<https://example.com/{"x" * 150}/{i}>)' for i in range(30))
+        chunks = _chunks('## 標題\n\n' + block)
+        self.assertTrue(all(len(c) <= 2000 for c in chunks))
+        self.assertTrue(all(c.count('](<') == c.count('>)') for c in chunks))  # 沒有切斷連結
+        self.assertNotIn('', chunks)
+
+
 class TestCompose(unittest.TestCase):
     def build(self, holdings, **kw):
         pf = Portfolio(holdings=holdings)
@@ -86,7 +144,8 @@ class TestCompose(unittest.TestCase):
             fetch_taifex=lambda: TAIFEX,
             fetch_html=lambda url: FOMC_HTML if 'federalreserve' in url else BEA_HTML,
             fetch_twse=lambda path: ([{'Date': '1151023', 'Code': '0050', 'Name': '元大台灣50', 'Exdividend': '息',
-                                       'CashDividend': '1.0'}] if 'TWT48U' in path else []), **kw)
+                                       'CashDividend': '1.0'}] if 'TWT48U' in path else []),
+            fetch_feed=fake_feed, **kw)
 
     def test_full_briefing(self):
         b = self.build([Holding(symbol='0050', name='元大台灣50', shares=100, cost=95, stop_price=99.5)])
@@ -99,6 +158,7 @@ class TestCompose(unittest.TestCase):
         self.assertIn('10/23 0050 元大台灣50 除息', txt)
         self.assertIn('接近停損', txt)                 # 100 距 99.5 在 2% 內
         self.assertIn('非投資建議', txt)
+        self.assertIn('[0050 規模創新高](<https://tw.example/1>)', txt)
         self.assertFalse(has_triggered(b))
 
     def test_source_failures_are_reported_not_fatal(self):
@@ -107,7 +167,8 @@ class TestCompose(unittest.TestCase):
         def boom(*a, **k):
             raise ConnectionError('down')
         b = build_briefing(pf, now=datetime(2026, 10, 21, 8, 30, tzinfo=TPE), price_fetcher=prices,
-                           default_tw_fee_bps=1, fetch_taifex=boom, fetch_html=boom, fetch_twse=boom)
+                           default_tw_fee_bps=1, fetch_taifex=boom, fetch_html=boom, fetch_twse=boom,
+                           fetch_feed=boom)
         txt = format_briefing(b)
         self.assertIn('抓取失敗', txt)
         self.assertIn('沒有接近或觸發你設定的任何規則', txt)

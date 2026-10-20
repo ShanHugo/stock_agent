@@ -156,14 +156,24 @@ def format_status(evaluations: list[dict], date: str) -> str:
 
 
 def _chunks(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
-    out, cur = [], ''
+    # 先依段落、段落過長再依行切，避免切斷 Markdown 連結；單行仍過長才硬切
+    pieces = []
     for block in text.split('\n\n'):
-        while len(block) > limit:  # 單段過長時硬切
-            out.append(block[:limit]); block = block[limit:]
-        if len(cur) + len(block) + 2 > limit:
-            out.append(cur); cur = block
+        if len(block) <= limit:
+            pieces.append((block, '\n\n'))
+            continue
+        for line in block.split('\n'):
+            while len(line) > limit:
+                pieces.append((line[:limit], '\n'))
+                line = line[limit:]
+            pieces.append((line, '\n'))
+    out, cur = [], ''
+    for piece, sep in pieces:
+        if cur and len(cur) + len(sep) + len(piece) > limit:
+            out.append(cur)
+            cur = piece
         else:
-            cur = f'{cur}\n\n{block}' if cur else block
+            cur = f'{cur}{sep}{piece}' if cur else piece
     if cur:
         out.append(cur)
     return out

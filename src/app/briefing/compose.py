@@ -7,6 +7,7 @@ from ..alerts.runner import run_alerts
 from ..alerts.rules import TRIGGERED, NEAR_STOP, NEAR_TARGET
 from ..alerts.notify import TITLES
 from . import sources as src
+from . import news as news_mod
 
 WEEKDAYS = '一二三四五六日'
 LOOKAHEAD_DAYS = 7       # 美國行事曆往後看幾天
@@ -17,7 +18,8 @@ LIMITATIONS = ['CPI、非農就業等 BLS 發布日無法自動取得（BLS 封�
 
 def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, default_tw_fee_bps: float,
                    fetch_taifex=src.fetch_taifex, fetch_html=src.fetch_html,
-                   fetch_twse=src.fetch_twse_openapi) -> dict:
+                   fetch_twse=src.fetch_twse_openapi, fetch_feed=news_mod.fetch_feed,
+                   include_news: bool = True) -> dict:
     today = now.date()
     errors: list[str] = []
     b = {'date': today, 'errors': errors, 'limitations': list(LIMITATIONS)}
@@ -64,6 +66,8 @@ def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, defaul
     except Exception as e:
         b['announcements'] = []
         errors.append(f'重大訊息: {e}')
+
+    b['news'] = news_mod.collect_news(portfolio, now, errors, fetch=fetch_feed) if include_news else None
 
     # 依你自己的規則：沿用每日檢查的判斷，但不寫入 state（不影響 14:30 的檢查）
     res = run_alerts(portfolio, price_fetcher, today=today, default_tw_fee_bps=default_tw_fee_bps,
@@ -135,6 +139,9 @@ def format_briefing(b: dict, narration: str | None = None) -> str:
         lines.append(f'- 你的台股持股與觀察清單未來 {EXDIV_LOOKAHEAD} 天沒有除權息')
     for a in b.get('announcements', []):
         lines.append(f"- 重大訊息 {a['code']} {a['name']}：{a['subject']}")
+
+    if b.get('news'):
+        lines += news_mod.format_news(b['news'], src.TPE)
 
     if b['holdings']:
         lines += ['', '**你的持股（最近收盤）**']

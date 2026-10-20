@@ -31,6 +31,7 @@ def main() -> int:
     p.add_argument('--dry-run', action='store_true', help='只印出，不推送')
     p.add_argument('--force', action='store_true', help='週末也執行')
     p.add_argument('--no-narrate', action='store_true', help='不使用 Ollama 摘要')
+    p.add_argument('--no-news', action='store_true', help='不抓新聞標題')
     args = p.parse_args()
 
     now = datetime.now(ZoneInfo('Asia/Taipei'))
@@ -38,7 +39,8 @@ def main() -> int:
         print('[skip] 週末不發盤前簡報')
         return 0
     portfolio = load_portfolio(args.portfolio)
-    b = build_briefing(portfolio, now=now, price_fetcher=fetch_ohlcv_yf, default_tw_fee_bps=settings.tx_fee_bps)
+    b = build_briefing(portfolio, now=now, price_fetcher=fetch_ohlcv_yf, default_tw_fee_bps=settings.tx_fee_bps,
+                       include_news=not args.no_news)
     text = format_briefing(b)
     if not args.no_narrate:
         narrator = OllamaNarrator(model=os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'),
