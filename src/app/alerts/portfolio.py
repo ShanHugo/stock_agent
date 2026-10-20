@@ -7,6 +7,7 @@
   cost              成交均價（美股為美元）
   entry_date        首次買進日 YYYY-MM-DD（只有移動停損需要）
   group             配置分組（選填，預設台股 "TW"、美股 "US"）
+  etf               是否為 ETF（台股 00 開頭自動判定；美股請自行標 true，否則視為個股）
   --- 停損 / 停利（全部選填）---
   stop_loss_pct     例 -0.08 → 跌破成本 8%（與 stop_price 擇一，stop_price 優先）
   stop_price        固定停損價
@@ -16,12 +17,14 @@
   take_profit_sell_ratio  停利時賣出比例，預設 1.0
   --- 從高點回落（選填）---
   drawdown_alert_pcts  例 [0.1, 0.2] → 從近一年高點回落 10%、20% 各通知一次
+  plan              交易計畫（由 record_trade 依 plan_trade 建立的計畫自動填入；見 plans.py）
 
 整體設定：
   near_threshold         距離停損/停利價多少以內發「接近」提醒，預設 0.02
   drawdown_window_days   回落的「高點」取最近幾個交易日，預設 252（約一年）
   allocation             {"targets": {"TW": 0.5, "US": 0.5}, "threshold": 0.05}
   fees                   覆寫賣出費用（bps），例 {"TW": {"fee_bps": 2.8}, "US": {"fee_bps": 10}}
+  risk                   部位控管參數（見 plans.py）
 """
 from __future__ import annotations
 import json
@@ -51,6 +54,8 @@ class Holding:
     trailing_stop_pct: float | None = None
     take_profit_sell_ratio: float = 1.0
     drawdown_alert_pcts: list[float] | None = None
+    plan: dict | None = None
+    etf: bool | None = None
 
     @property
     def market(self) -> str:
@@ -64,7 +69,9 @@ class Holding:
 
     @property
     def is_etf(self) -> bool:
-        # 台股 ETF 代號以 00 開頭
+        if self.etf is not None:
+            return bool(self.etf)
+        # 台股 ETF 代號以 00 開頭；美股無法從代號判斷，需在 portfolio.json 標 "etf": true
         return not self.is_us and self.symbol.startswith('00')
 
     @property
@@ -82,6 +89,11 @@ class Holding:
     @property
     def label(self) -> str:
         return f'{self.symbol} {self.name}'.strip()
+
+    @property
+    def needs_plan(self) -> bool:
+        """個股需要交易計畫；ETF 定期定額不需要。"""
+        return not self.is_etf
 
     def stop_level(self) -> float | None:
         if self.stop_price is not None:
@@ -105,7 +117,11 @@ class Portfolio:
     drawdown_window_days: int = 252
     allocation: dict | None = None
     fees: dict = field(default_factory=dict)
+    risk: dict | None = None
     errors: list[str] = field(default_factory=list)
+
+    def buy_fee_bps(self, h: Holding, default_tw_fee_bps: float) -> float:
+        return self.sell_costs_bps(h, default_tw_fee_bps)[0]
 
     def sell_costs_bps(self, h: Holding, default_tw_fee_bps: float) -> tuple[float, float]:
         """回傳 (手續費 bps, 交易稅 bps)，用於賣出估算。"""
@@ -184,5 +200,6 @@ def load_portfolio(path: str | Path) -> Portfolio:
         drawdown_window_days=raw.get('drawdown_window_days', 252),
         allocation=alloc if alloc and not any(e.startswith('allocation') for e in errors) else None,
         fees=raw.get('fees', {}),
+        risk=raw.get('risk'),
         errors=errors,
     )

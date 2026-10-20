@@ -1,4 +1,4 @@
-"""每日持股檢查：抓資料 → Data QA → 停損/停利、回落、配置偏離 → 組訊息 →（講評）→ 交給呼叫端推送。"""
+"""每日持股檢查：抓資料 → Data QA → 停損/停利、計畫失效、回落、配置、部位風險 → 組訊息 →（講評）→ 交給呼叫端推送。"""
 from __future__ import annotations
 import json
 from datetime import date, datetime, time, timedelta
@@ -11,12 +11,14 @@ import pandas as pd
 from ..pipeline.qa import run_quality_checks
 from .portfolio import Portfolio, Holding
 from .rules import evaluate_holding, drawdown_status, allocation_status, OK, TRIGGERED
+from .plans import check_invalidation, thesis_review_due, portfolio_risk, validate_risk
 from .notify import build_message
 
 Fetcher = Callable[[str, str, str], pd.DataFrame]
 
 FX_SYMBOL = 'TWD=X'  # 1 美元 = ? 台幣
 HISTORY_DAYS = 400   # 回落要看近一年高點，多抓一些
+REVIEW_REMIND_EVERY = 7  # 理由確認逾期後，每隔幾天再提醒一次
 
 # 各市場「當天 K 棒可視為收盤價」的時間（當地時間）；之前的當天 K 棒只是盤中價
 MARKET_CLOSE = {
@@ -73,6 +75,11 @@ def new_drawdown_alerts(prev: dict, statuses: list[dict]) -> tuple[dict, list[di
     return new_state, alerts
 
 
+def _risk_flags(pr: dict) -> list[str]:
+    flags = ['total'] if pr['total_risk_exceeded'] else []
+    return flags + [f"size:{p['symbol']}" for p in pr['oversized']]
+
+
 def run_alerts(
     portfolio: Portfolio,
     fetcher: Fetcher,
@@ -84,7 +91,7 @@ def run_alerts(
     force: bool = False,
     now: datetime | None = None,
 ) -> dict:
-    """回傳 {'skipped', 'message', 'alerts', 'drawdowns', 'allocation', 'evaluations', 'errors', ...}；不負責推送。
+    """回傳 {'skipped', 'message', 'alerts', 'drawdowns', 'allocation', 'risk', 'evaluations', 'errors', ...}；不負責推送。
 
     沒有任何持股出現比上次檢查更新的收盤資料時（休市、重複執行）略過，除非 force。
     """
@@ -109,6 +116,10 @@ def run_alerts(
             continue
         fee, tax = portfolio.sell_costs_bps(h, default_tw_fee_bps)
         ev = evaluate_holding(h, df['close'], near_threshold=portfolio.near_threshold, fee_bps=fee, tax_bps=tax)
+        if ev['kind'] not in TRIGGERED and h.plan:
+            hits = check_invalidation(h, df['close'], today)
+            if hits:
+                ev = _as_plan_invalid(ev, h, hits, fee, tax)
         evaluations.append(ev)
         latest[h.symbol] = (h, ev)
         dd = drawdown_status(h, df['close'], portfolio.drawdown_window_days)
@@ -119,7 +130,7 @@ def run_alerts(
     has_new = any(ev['date'] > last_dates.get(sym, '') for sym, (_, ev) in latest.items())
     if not force and latest and not has_new:
         return {'skipped': '沒有比上次檢查更新的收盤資料（休市或已檢查過）', 'message': None,
-                'alerts': [], 'drawdowns': [], 'allocation': None, 'evaluations': evaluations,
+                'alerts': [], 'drawdowns': [], 'allocation': None, 'risk': None, 'evaluations': evaluations,
                 'errors': errors, 'narration_error': None}
 
     alerts = sorted([e for e in evaluations if e['kind'] != OK],
@@ -127,21 +138,58 @@ def run_alerts(
     price_state, streaks = update_streaks(state.get('price', {}), alerts)
     dd_state, dd_alerts = new_drawdown_alerts(state.get('drawdown', {}), dd_statuses)
 
-    alloc, alloc_alert, fx = None, None, None
-    if portfolio.allocation and latest:
-        alloc, fx, err = _allocation(portfolio, latest, fetcher, today, end)
-        if err:
-            errors.append(err)
-        elif alloc['out_of_band'] and not state.get('alloc_out'):
-            alloc_alert = alloc  # 從正常變偏離才通知
+    # 美元匯率：配置與部位風險都需要換算台幣
+    fx, fx_err = None, None
+    needs_fx = any(h.is_us for h, _ in latest.values()) and (portfolio.allocation or portfolio.risk)
+    if needs_fx:
+        try:
+            fx_df = fetcher(FX_SYMBOL, (today - timedelta(days=10)).strftime('%Y-%m-%d'), end)
+            fx = float(fx_df['close'].dropna().iloc[-1])
+        except Exception as e:
+            fx_err = f'抓美元匯率失敗（{e}），略過配置與部位風險檢查'
+            errors.append(fx_err)
+
+    alloc, alloc_alert = None, None
+    if portfolio.allocation and latest and not fx_err:
+        if len(latest) < len(portfolio.holdings):
+            errors.append('有持股抓不到價格，略過配置偏離檢查')
+        else:
+            alloc = _allocation(portfolio, latest, fx)
+            if alloc['out_of_band'] and not state.get('alloc_out'):
+                alloc_alert = alloc  # 從正常變偏離才通知
+
+    risk, risk_alert = None, None
+    risk_flags = state.get('risk_flags', [])
+    if portfolio.risk and latest and not fx_err:
+        errs = validate_risk(portfolio.risk)
+        if errs:
+            errors.extend(errs)
+        else:
+            risk = portfolio_risk([(h, ev['close'], fx if h.is_us else 1.0) for h, ev in latest.values()],
+                                  portfolio.risk)
+            new_flags = _risk_flags(risk)
+            if set(new_flags) - set(risk_flags):
+                risk_alert = risk  # 出現新的超限項目才通知
+            risk_flags = new_flags
+
+    reviews, reminded = [], dict(state.get('review_reminded', {}))
+    review_days = (portfolio.risk or {}).get('review_days', 30)
+    for h, ev in latest.values():
+        days = thesis_review_due(h, today, review_days)
+        last = reminded.get(h.symbol)
+        if days and (not last or (today - date.fromisoformat(last)).days >= REVIEW_REMIND_EVERY):
+            reviews.append({'symbol': h.symbol, 'label': h.label, 'days': days, 'thesis': h.plan['thesis']})
+            reminded[h.symbol] = today.isoformat()
+        elif not days:
+            reminded.pop(h.symbol, None)
 
     def build(narration=None):
         return build_message(alerts, streaks, errors, today.strftime('%Y-%m-%d'), narration=narration,
-                             drawdowns=dd_alerts, allocation=alloc_alert, fx=fx)
+                             drawdowns=dd_alerts, allocation=alloc_alert, fx=fx, risk=risk_alert, reviews=reviews)
 
     message = build()
     narration_error = None
-    if message and narrator is not None and (alerts or dd_alerts or alloc_alert):
+    if message and narrator is not None and (alerts or dd_alerts or alloc_alert or risk_alert):
         has_triggered = any(a['kind'] in TRIGGERED for a in alerts)
         narration, narration_error = narrator.summarize(message, has_triggered=has_triggered)
         if narration:
@@ -152,28 +200,33 @@ def run_alerts(
             'price': price_state,
             'drawdown': dd_state,
             'alloc_out': bool(alloc['out_of_band']) if alloc else state.get('alloc_out', False),
+            'risk_flags': risk_flags,
+            'review_reminded': reminded,
             'last_dates': {**last_dates, **{sym: ev['date'] for sym, (_, ev) in latest.items()}},
         }
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(new_state, ensure_ascii=False, indent=2), encoding='utf-8')
 
     return {'skipped': None, 'message': message, 'alerts': alerts, 'drawdowns': dd_alerts,
-            'allocation': alloc, 'fx': fx, 'evaluations': evaluations, 'errors': errors,
-            'narration_error': narration_error, 'run_at': datetime.now().isoformat(timespec='seconds')}
+            'allocation': alloc, 'risk': risk, 'reviews': reviews, 'fx': fx, 'evaluations': evaluations,
+            'errors': errors, 'narration_error': narration_error,
+            'run_at': datetime.now().isoformat(timespec='seconds')}
 
 
-def _allocation(portfolio: Portfolio, latest: dict[str, tuple[Holding, dict]], fetcher: Fetcher,
-                today: date, end: str) -> tuple[dict | None, float | None, str | None]:
-    if len(latest) < len(portfolio.holdings):
-        return None, None, '有持股抓不到價格，略過配置偏離檢查'
-    fx = None
-    if any(h.is_us for h, _ in latest.values()):
-        try:
-            fx_df = fetcher(FX_SYMBOL, (today - timedelta(days=10)).strftime('%Y-%m-%d'), end)
-            fx = float(fx_df['close'].dropna().iloc[-1])
-        except Exception as e:
-            return None, None, f'抓美元匯率失敗（{e}），略過配置偏離檢查'
+def _as_plan_invalid(ev: dict, h: Holding, hits: list[str], fee: float, tax: float) -> dict:
+    """計畫失效條件成立：依計畫出場（全部賣出）。"""
+    qty = h.shares
+    notional = qty * ev['close']
+    fees = notional * (fee + tax) / 10000
+    whole = int(qty) if not h.is_us else 0
+    return {**ev, 'kind': 'PLAN_INVALID', 'invalid_reasons': hits, 'thesis': h.plan.get('thesis'),
+            'action': {'side': 'SELL', 'qty': qty, 'lots': whole // 1000, 'odd_shares': whole % 1000,
+                       'est_notional': notional, 'est_fees': fees,
+                       'est_pnl': (ev['close'] - h.cost) * qty - fees}}
+
+
+def _allocation(portfolio: Portfolio, latest: dict[str, tuple[Holding, dict]], fx: float | None) -> dict:
     values = {sym: h.shares * ev['close'] * (fx if h.is_us else 1.0) for sym, (h, ev) in latest.items()}
     groups = {sym: h.alloc_group for sym, (h, _) in latest.items()}
     a = portfolio.allocation
-    return allocation_status(values, groups, a['targets'], a['threshold']), fx, None
+    return allocation_status(values, groups, a['targets'], a['threshold'])

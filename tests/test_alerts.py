@@ -251,21 +251,22 @@ class TestTrades(unittest.TestCase):
     RAW = {'holdings': [{'symbol': '0050', 'name': '元大台灣50', 'shares': 204, 'cost': 87.76}]}
 
     def test_buy_updates_weighted_average(self):
-        raw, msg = apply_trade(self.RAW, 'buy', '0050', 12, 108.5)
+        raw = apply_trade(self.RAW, 'buy', '0050', 12, 108.5)['portfolio']
         h = raw['holdings'][0]
         self.assertEqual(h['shares'], 216)
         self.assertAlmostEqual(h['cost'], round((204 * 87.76 + 12 * 108.5) / 216, 4))
         self.assertEqual(self.RAW['holdings'][0]['shares'], 204)  # 原 dict 不變
 
     def test_buy_new_us_fractional(self):
-        raw, _ = apply_trade(self.RAW, 'buy', 'voo', 0.0712, 701.3, name='先鋒標普500', trade_date='2026-10-20')
+        raw = apply_trade(self.RAW, 'buy', 'voo', 0.0712, 701.3, name='先鋒標普500', trade_date='2026-10-20',
+                          etf=True)['portfolio']
         voo = raw['holdings'][1]
         self.assertEqual((voo['symbol'], voo['shares'], voo['entry_date']), ('VOO', 0.0712, '2026-10-20'))
 
     def test_sell(self):
-        raw, _ = apply_trade(self.RAW, 'sell', '0050', 4, 110)
+        raw = apply_trade(self.RAW, 'sell', '0050', 4, 110)['portfolio']
         self.assertEqual((raw['holdings'][0]['shares'], raw['holdings'][0]['cost']), (200, 87.76))
-        raw, _ = apply_trade(self.RAW, 'sell', '0050', 204, 110)
+        raw = apply_trade(self.RAW, 'sell', '0050', 204, 110)['portfolio']
         self.assertEqual(raw['holdings'], [])
         with self.assertRaises(ValueError):
             apply_trade(self.RAW, 'sell', '0050', 300, 110)

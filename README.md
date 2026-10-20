@@ -56,7 +56,29 @@ python scripts/check_alerts.py             # 推送
   或把「接近」寫成「觸發」時會整段捨棄。加 `--no-narrate` 可關閉。
 - 提醒依你自己設定的規則產生，非投資建議；是否下單請自行決定。
 
-### 6. 測試
+### 6. 個股交易計畫與部位控管
+操作個股（非 ETF）時，系統要求先寫計畫，並依你在 `portfolio.json` 的 `"risk"` 設定算出最多能買幾股：
+```json
+"risk": {"capital": 500000, "max_risk_per_trade": 0.01, "max_position_pct": 0.2, "max_total_risk": 0.05}
+```
+（數字只是格式範例，請依你自己的資金與承受度填寫；欄位說明見 `src/app/alerts/plans.py`）
+
+```bash
+# 1. 買前：寫理由、停損與失效條件，算出可買股數
+python scripts/plan_trade.py new 2317 --stop 190 --thesis "AI 伺服器出貨成長" --invalid below_ma:60
+# 2. 買進後記錄（自動套用計畫；超出股數或風險預算會警告）
+python scripts/record_trade.py buy 2317 90 240
+# 3. 每日檢查會加上：理由失效條件、總曝險、單一個股占比、定期確認理由
+python scripts/plan_trade.py review 2317      # 理由仍成立時確認
+# 4. 賣出記錄會寫入交易日誌；每月檢討
+python scripts/record_trade.py sell 2317 90 260
+python scripts/review_trades.py
+```
+- 失效條件目前只支援價格/時間：`close_below:價格`、`below_ma:天數`、`time_stop:天數:最低報酬`。
+- ETF 不需計畫、不受單一持股上限限制；台股 00 開頭自動判定，美股 ETF 請在持股標 `"etf": true`（或買進時加 `--etf`）。
+- 交易日誌記錄 R 倍數（損益 ÷ 初始每股風險）與出場方式，檢討時會標出停損執行偏慢、虧損超過 1R 的交易。
+
+### 7. 測試
 - 以 `sample_data.csv` 驗證端到端流程
 
 ---
