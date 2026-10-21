@@ -91,6 +91,7 @@ button.b.mini { padding: 3px 10px; font-size: 13px; }
     <button data-tab="trade">交易與計畫</button>
     <button data-tab="research">研究卡</button>
     <button data-tab="lab">選股研究</button>
+    <button data-tab="paper">模擬帳戶</button>
     <button data-tab="settings">設定與排程</button>
   </nav>
   <div id="envbar"></div>
@@ -270,6 +271,33 @@ button.b.mini { padding: 3px 10px; font-size: 13px; }
   </div>
 </section>
 
+<section class="tab" id="tab-paper">
+  <div class="card" id="pp-status-card">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">模擬帳戶：營收動能</h2>
+      <span id="pp-state"></span>
+      <span class="hint" id="pp-time" style="margin:0"></span>
+      <span style="margin-left:auto" class="btns">
+        <button class="b" style="margin:0" onclick="runJob('paper_bot', {}, 'pp-out')">立即執行今天的流程</button>
+        <button class="b" style="margin:0" id="pp-pause" onclick="togglePause()"></button>
+      </span>
+    </div>
+    <p class="hint" id="pp-rules"></p>
+    <div id="pp-out"></div>
+  </div>
+  <div class="kpis" id="pp-kpis"></div>
+  <div class="card">
+    <h2>淨值走勢（同樣起始資金放 0050 比較）</h2>
+    <div id="pp-chart"></div>
+  </div>
+  <div class="row">
+    <div class="card"><h2>下一個交易日開盤要執行</h2><div class="scroll"><table id="pp-pending"></table></div></div>
+    <div class="card"><h2>目前持股</h2><div class="scroll"><table id="pp-positions"></table></div></div>
+  </div>
+  <div class="card"><h2>交易紀錄</h2><div class="scroll" style="max-height:420px;overflow-y:auto"><table id="pp-trades"></table></div></div>
+  <div class="card"><h2>歷史模擬（2018 年中至今，同一套規則與成本）</h2><div id="pp-backtest"></div></div>
+</section>
+
 <section class="tab" id="tab-settings">
   <div class="row">
     <div class="card">
@@ -311,7 +339,7 @@ async function api(path, opts = {}) {
 }
 
 // ---------- 分頁 ----------
-const loaders = {overview: () => loadOverview(), lab: () => { loadRadar(); loadForward(); loadReports(); loadProgress(); }, settings: () => { loadStatus(); loadPortfolio(); }, research: () => loadWatch()};
+const loaders = {overview: () => loadOverview(), lab: () => { loadRadar(); loadForward(); loadReports(); loadProgress(); }, settings: () => { loadStatus(); loadPortfolio(); }, paper: () => loadPaper(), research: () => loadWatch()};
 $('nav').addEventListener('click', e => {
   const tab = e.target.dataset.tab; if (!tab) return;
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
@@ -370,7 +398,7 @@ async function pollJob(id, out) {
     const state = j.status === 'running' ? `<span class="tag warn">執行中 ${secs} 秒</span> <button class="b" onclick="api('/api/jobs/${id}/stop',{method:'POST'})">停止</button>`
       : j.status === 'done' ? `<span class="tag ok">完成</span> ${secs} 秒` : `<span class="tag bad">失敗（代碼 ${j.exit_code}）</span>`;
     out.innerHTML = `<div class="out"><div class="meta"><strong>${esc(j.title)}</strong>${state}</div><div class="md">${md(j.output || '')}</div></div>`;
-    if (j.status !== 'running') { if (['record_trade','plan_new','plan_review','plan_cancel'].includes(j.kind)) loadOverview(true); if (j.kind === 'forward_test') loadForward(); if (j.kind === 'sector_radar') { loadRadar(); loadReports(); } return; }
+    if (j.status !== 'running') { if (['record_trade','plan_new','plan_review','plan_cancel'].includes(j.kind)) loadOverview(true); if (j.kind === 'forward_test') loadForward(); if (j.kind === 'paper_bot') loadPaper(); if (j.kind === 'sector_radar') { loadRadar(); loadReports(); } return; }
     await new Promise(r => setTimeout(r, Date.now() - t0 > 60000 ? 3000 : 1200));
   }
 }
@@ -440,6 +468,84 @@ async function saveWatch(list) {
 }
 function addWatch() { const c = val('wl-add'); if (!c) return; const l = JSON.parse($('wl-chips').dataset.list || '[]'); saveWatch([...l, ...c.split(/[\s,，]+/)]); $('wl-add').value = ''; }
 function removeWatch(c) { saveWatch(JSON.parse($('wl-chips').dataset.list || '[]').filter(x => x !== c)); }
+
+// ---------- 模擬帳戶 ----------
+let paperPaused = false;
+const plain = v => `${+(v * 100).toFixed(2)}%`;      // 不帶正負號的百分比（設定值用）
+const SIDE = {buy: ['買進', 'ok'], sell: ['賣出', 'bad'], dividend: ['除權息入帳', 'warn'], reduction: ['減資換股', 'warn']};
+function lineChart(points, series) {
+  // points: [{date, ...}]；series: [{key, label, color}]
+  if (points.length < 2) return '<p class="hint">累積兩個交易日以上的紀錄後才會畫出走勢；目前只有起始日。</p>';
+  const W = 900, H = 260, P = {l: 56, r: 12, t: 12, b: 28};
+  const vals = points.flatMap(p => series.map(s => p[s.key]).filter(v => v != null));
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || hi * 0.02; lo -= pad; hi += pad;
+  const x = i => P.l + i * (W - P.l - P.r) / (points.length - 1), y = v => P.t + (hi - v) * (H - P.t - P.b) / (hi - lo);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => lo + (hi - lo) * f);
+  const xt = [0, Math.floor((points.length - 1) / 2), points.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="淨值走勢">
+    ${ticks.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${P.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${Math.round(v).toLocaleString()}</text>`).join('')}
+    ${xt.map(i => `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">${points[i].date.slice(5)}</text>`).join('')}
+    ${series.map(s => `<polyline fill="none" stroke="${s.color}" stroke-width="2" points="${points.map((p, i) => p[s.key] == null ? '' : `${x(i)},${y(p[s.key])}`).join(' ')}"/>`).join('')}
+  </svg><div class="hint" style="display:flex;gap:16px">${series.map(s => `<span><span style="display:inline-block;width:14px;height:3px;background:${s.color};vertical-align:middle"></span> ${s.label}</span>`).join('')}</div>`;
+}
+async function loadPaper() {
+  let d; try { d = await api('/api/paper'); } catch (e) { $('pp-rules').innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+  paperPaused = d.paused;
+  $('pp-state').innerHTML = d.paused ? '<span class="tag warn">已暫停</span>' : '<span class="tag ok">運作中（平日 16:50）</span>';
+  $('pp-pause').textContent = d.paused ? '恢復模擬帳戶' : '暫停模擬帳戶';
+  if (!d.exists) { $('pp-rules').textContent = '還沒有模擬帳戶。按「立即執行今天的流程」建立。'; return; }
+  const v = d.view, s = v.summary, c = v.config;
+  $('pp-time').textContent = `資料至 ${v.last_date} 收盤，更新於 ${v.updated.replace('T', ' ').slice(0, 16)}`;
+  $('pp-rules').textContent = `自 ${v.start} 起，起始資金 ${fmt(v.capital, 0)} 元。規則：上市＋上櫃電子股中最近 2 個月營收都年增、站上 120 日線者，依營收年增率由高到低買進；`
+    + `每筆最多虧 ${plain(c.max_risk_per_trade)}、單一個股 ≤ ${plain(c.max_position_pct)}、總風險 ≤ ${plain(c.max_total_risk)}、停損設在買價下方 ${plain(c.stop_pct)}；`
+    + (c.breakeven_after ? `收盤漲到成本 +${plain(c.breakeven_after)} 後，停損上移到成本價（保本）；` : '')
+    + (c.take_profit_pct ? `漲到 +${plain(c.take_profit_pct)} 停利；` : '')
+    + `跌破停損、跌破 120 日線或營收連 2 月年減就賣。以隔天開盤價成交，手續費 ${+(c.fee_discount * 10).toFixed(2)} 折（最低 ${c.min_fee} 元）。這是模擬，不是買賣建議。`
+    + (d.paused ? `　暫停資訊：${d.paused_info}` : '');
+  const value = v.positions.reduce((a, p) => a + p.shares * (p.last || p.entry), 0);
+  $('pp-kpis').innerHTML = [
+    ['淨值', fmt(s.equity, 0)],
+    ['報酬', `<span class="${cls(s.total_return)}">${pct(s.total_return)}</span>`],
+    ['同期 0050', `<span class="${cls(s.bench_total_return)}">${pct(s.bench_total_return)}</span>`],
+    ['現金／持股市值', `${fmt(v.cash, 0)}／${fmt(value, 0)}`],
+    ['完成交易', s.closed_trades ? `${s.closed_trades} 筆，勝率 ${Math.round(s.win_rate * 100)}%` : '尚無'],
+  ].map(([l, x]) => `<div class="kpi"><div class="v">${x}</div><div class="l">${l}</div></div>`).join('');
+  $('pp-chart').innerHTML = lineChart(v.curve, [{key: 'equity', label: '模擬帳戶', color: 'var(--accent)'}, {key: 'bench', label: '0050（同樣起始資金）', color: 'var(--muted)'}]);
+  const name = x => `${esc(x.code)} ${esc(x.name || '')}`;
+  $('pp-pending').innerHTML = v.pending.length ? '<tr><th>動作</th><th>股票</th><th class="num">股數</th><th class="num">參考收盤</th><th class="num">停損約</th><th>理由</th></tr>' +
+    v.pending.map(o => `<tr><td><span class="tag ${SIDE[o.side][1]}">${SIDE[o.side][0]}</span></td><td>${name(o)}</td><td class="num">${o.shares}</td>
+      <td class="num">${fmt(o.ref_price)}</td><td class="num">${o.stop_est ? fmt(o.stop_est) : '—'}</td><td style="white-space:normal">${esc(o.reason)}</td></tr>`).join('')
+    : '<tr><td class="hint">沒有待執行的單</td></tr>';
+  $('pp-positions').innerHTML = v.positions.length ? '<tr><th>股票</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">報酬</th><th class="num">停損</th><th>買進日</th></tr>' +
+    v.positions.map(p => { const last = p.last || p.entry, stale = p.last_date && (new Date(v.last_date) - new Date(p.last_date)) / 864e5 >= 5;
+      return `<tr><td>${name(p)}${stale ? ' <span class="tag bad">多日無成交價</span>' : ''}</td><td class="num">${p.shares}</td><td class="num">${fmt(p.entry)}</td><td class="num">${fmt(last)}</td>
+      <td class="num ${cls(last / p.entry - 1)}">${pct(last / p.entry - 1)}</td><td class="num">${fmt(p.stop)}</td><td>${esc(p.entry_date)}</td></tr>`; }).join('')
+    : '<tr><td class="hint">目前沒有持股</td></tr>';
+  $('pp-trades').innerHTML = v.trades.length ? '<tr><th>日期</th><th>動作</th><th>股票</th><th class="num">股數</th><th class="num">價格</th><th class="num">金額</th><th class="num">費用</th><th class="num">損益</th><th>說明</th></tr>' +
+    v.trades.map(t => `<tr><td>${esc(t.date)}</td><td><span class="tag ${(SIDE[t.side] || ['', 'warn'])[1]}">${(SIDE[t.side] || [t.side])[0]}</span></td><td>${name(t)}</td>
+      <td class="num">${t.shares ?? ''}</td><td class="num">${t.price ? fmt(t.price) : ''}</td><td class="num">${t.amount != null ? fmt(t.amount, 0) : ''}</td>
+      <td class="num">${t.fees != null ? fmt(t.fees, 0) : ''}</td><td class="num ${cls(t.pnl)}">${t.pnl != null ? fmt(t.pnl, 0) + `（${pct(t.return)}）` : ''}</td>
+      <td style="white-space:normal">${esc(t.reason || (t.from_shares ? `${t.from_shares} 股換成 ${t.shares} 股` : ''))}</td></tr>`).join('')
+    : '<tr><td class="hint">還沒有成交。第一筆模擬單會在下一個交易日開盤成交。</td></tr>';
+  const b = d.backtest && d.backtest.summary, L = d.luck && d.luck.runs;
+  let h = '';
+  if (b) h += `<p>單次模擬：年化 ${pct(b.cagr)}（0050 ${pct(b.bench_cagr)}），最大回撤 ${pct(b.max_drawdown)}（0050 ${pct(b.bench_max_drawdown)}），`
+    + `${b.closed_trades} 筆交易、勝率 ${Math.round(b.win_rate * 100)}%，平均每筆 ${pct(b.avg_return)}（賺 ${pct(b.avg_win)}／賠 ${pct(b.avg_loss)}），平均持有 ${Math.round(b.avg_hold_days)} 天。</p>`;
+  if (L) {
+    const g = L.map(r => r['差距']).sort((a, b) => a - b), cg = L.map(r => r['年化']).sort((a, b) => a - b), mid = a => (a[3] + a[4]) / 2;
+    h += `<p><strong>運氣的範圍</strong>（${esc(d.luck.note)}）：年化 ${pct(cg[0])} ～ ${pct(cg[cg.length - 1])}、中位數 ${pct(mid(cg))}；`
+      + `與 0050 的差距 ${pct(g[0])} ～ ${pct(g[g.length - 1])}、中位數 ${pct(mid(g))}；${L.filter(r => r['差距'] > 0).length}／${L.length} 次贏過 0050；`
+      + `最大回撤每次都約 ${pct(L[0]['最大回撤'])}。</p><p class="hint">只持有 3～4 檔，進出時點稍有不同結果就差很多；可以確定的是約 -46% 的回撤，以及「多半小贏、但贏多少看運氣」。`
+      + `完整報告見「選股研究」分頁的 ${esc((d.backtest && d.backtest.report) || 'paper_bot_backtest')}。</p>`;
+  }
+  $('pp-backtest').innerHTML = h || '<p class="hint">還沒有歷史模擬。</p>';
+}
+async function togglePause() {
+  const to = !paperPaused;
+  if (!confirm(to ? '暫停模擬帳戶？暫停期間每天 16:50 不交易、不推送；之後恢復時會補跑暫停期間的交易日。' : '恢復模擬帳戶？')) return;
+  try { await api('/api/paper/pause', {method: 'POST', body: JSON.stringify({paused: to})}); toast(to ? '已暫停' : '已恢復'); } catch (e) { toast(e.message); }
+  loadPaper();
+}
 
 // ---------- 族群雷達 ----------
 async function loadRadar() {

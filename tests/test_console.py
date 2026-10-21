@@ -101,6 +101,23 @@ class TestConsoleApi(unittest.TestCase):
         with mock.patch.object(console, 'external_lab_running', return_value=False):
             self.assertEqual(self.client.post('/api/jobs', json={'kind': 'shell', 'params': {}}).status_code, 400)
 
+    def test_paper_view_and_pause(self):
+        d = Path(self.tmp.name) / 'paper'
+        with mock.patch.object(console, 'PAPER', d):
+            self.assertFalse(self.client.get('/api/paper').json()['exists'])
+            d.mkdir()
+            (d / 'latest.json').write_text(json.dumps({'last_date': '2026-10-21', 'curve': []}), encoding='utf-8')
+            r = self.client.get('/api/paper').json()
+            self.assertTrue(r['exists'])
+            self.assertFalse(r['paused'])
+            self.assertTrue(self.client.post('/api/paper/pause', json={'paused': True}).json()['paused'])
+            self.assertTrue((d / 'paused').exists())
+            self.assertIn('暫停', self.client.get('/api/paper').json()['paused_info'])
+            self.assertFalse(self.client.post('/api/paper/pause', json={'paused': False}).json()['paused'])
+            self.assertFalse((d / 'paused').exists())
+        cmd, _ = build_command('paper_bot', {'send': True, 'reset': True})
+        self.assertEqual(len(cmd), 1)                       # 操作台不能重設帳戶或另外加參數
+
     def test_parse_progress(self):
         p = console.parse_progress(['[twse] 行情 2016-03-01 (300/3078)', '[tpex] 法人與融資 2019-01-02 (101/2150)',
                                     '[twse] 行情 2016-08-01 (400/3078)'])

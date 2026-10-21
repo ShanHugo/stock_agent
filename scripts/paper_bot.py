@@ -31,6 +31,7 @@ from src.app.alerts.portfolio import load_portfolio
 STATE = _ROOT / 'state' / 'paper_bot'
 FEE_DISCOUNT = 0.28
 MIN_FEE = 1.0
+BREAKEVEN_AFTER = 0.20      # 方案 E：收盤漲到成本 +20% 後，停損上移到成本價（2026-10-21 依 5 方案 × 8 起始日比較選定）
 
 
 def config_from_portfolio(slippage: float = 0.0) -> Config:
@@ -39,7 +40,8 @@ def config_from_portfolio(slippage: float = 0.0) -> Config:
         raise SystemExit('[error] portfolio.json 沒有 risk.capital，請先設定個股操作資金')
     return Config(capital=float(risk['capital']), max_risk_per_trade=risk.get('max_risk_per_trade', 0.03),
                   max_position_pct=risk.get('max_position_pct', 0.2), max_total_risk=risk.get('max_total_risk', 0.08),
-                  fee_rate=0.001425 * FEE_DISCOUNT, min_fee=MIN_FEE, slippage=slippage)
+                  fee_rate=0.001425 * FEE_DISCOUNT, min_fee=MIN_FEE, slippage=slippage,
+                  breakeven_after=BREAKEVEN_AFTER)
 
 
 def revenue_panels(ds, index, columns):
@@ -165,8 +167,37 @@ def raw_quote(d, field):
     return pd.concat(parts).drop_duplicates('code').set_index('code')[field].astype(float)
 
 
+PAUSED = STATE / 'paused'
+
+
+def write_view(bot, cfg, s, start, bench, nm, now) -> None:
+    """操作台「模擬帳戶」分頁讀的資料：淨值與同資金 0050 走勢、持股、待執行單、交易紀錄。"""
+    b = bench.copy()
+    b.index = b.index.strftime('%Y-%m-%d')
+    b0 = b.get(bot.equity[0]['date']) if bot.equity else None
+    curve = [{'date': e['date'], 'equity': e['equity'],
+              'bench': round(cfg.capital * b[e['date']] / b0, 2) if b0 and e['date'] in b.index else None}
+             for e in bot.equity]
+    named = lambda x: {**x, 'name': nm(x['code']).split(' ', 1)[-1] if ' ' in nm(x['code']) else ''}
+    view = {
+        'updated': now.isoformat(timespec='seconds'), 'start': start, 'last_date': bot.last_date,
+        'capital': cfg.capital, 'cash': round(bot.cash, 2), 'summary': s, 'curve': curve,
+        'config': {'max_risk_per_trade': cfg.max_risk_per_trade, 'max_position_pct': cfg.max_position_pct,
+                   'max_total_risk': cfg.max_total_risk, 'stop_pct': cfg.stop_pct, 'fee_discount': FEE_DISCOUNT,
+                   'breakeven_after': cfg.breakeven_after, 'take_profit_pct': cfg.take_profit_pct,
+                   'min_fee': MIN_FEE},
+        'positions': [named({'code': c, **p}) for c, p in bot.positions.items()],
+        'pending': [named(o) for o in bot.pending],
+        'trades': [named(t) for t in bot.trades[-200:]][::-1],
+    }
+    (STATE / 'latest.json').write_text(json.dumps(view, ensure_ascii=False, indent=1, default=float), encoding='utf-8')
+
+
 def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
     load_dotenv(_ROOT / '.env')
+    if PAUSED.exists() and not (reset or dry_run):
+        print(f'[skip] 模擬帳戶已暫停（{PAUSED.read_text(encoding="utf-8").strip()}）；刪除 state/paper_bot/paused 或在操作台按「恢復」即可繼續')
+        return 0
     now = datetime.now(ZoneInfo('Asia/Taipei'))
     today = now.date()
     end = today - timedelta(days=1)
@@ -234,13 +265,15 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
             seen = p.get('last_date') or p['entry_date']
             if (pd.Timestamp(bot.last_date) - pd.Timestamp(seen)).days >= 5:
                 L.append(f"  ⚠️ 自 {seen} 起沒有成交價（停牌或下市），模擬帳戶無法賣出，請自行確認這檔的狀況")
-    L.append('_模擬操作，不是買賣建議；真實下單請自行判斷。成交假設：隔天開盤價，手續費 2.8 折（最低 1 元）。_')
+    L.append('_模擬操作，不是買賣建議；真實下單請自行判斷。成交假設：隔天開盤價，手續費 2.8 折（最低 1 元）。'
+             + (f'漲到成本 +{cfg.breakeven_after:.0%} 後停損移到成本價。' if cfg.breakeven_after else '') + '_')
     text = '\n'.join(L)
     print(text)
     if dry_run:
         print('[dry-run] 未寫入帳戶、未推送')
         return 0
     (STATE / 'latest.txt').write_text(text, encoding='utf-8')
+    write_view(bot, cfg, s, start, px['0050'], nm, now)
     # 每日推送：--send 或 .env 的 PAPER_BOT_AUTO_SEND=1；優先送到模擬帳戶專用頻道 PAPER_BOT_WEBHOOK_URL
     if len(days) == 0:
         print('[skip] 沒有新的交易日（休市或今天已處理），不重複推送')

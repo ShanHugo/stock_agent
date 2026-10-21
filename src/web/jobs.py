@@ -121,6 +121,8 @@ def build_command(kind: str, p: dict) -> tuple[list[str], str]:
     if kind == 'sector_radar':
         return [s('sector_radar.py')] + ['--backtest'] * bool(p.get('backtest')), \
             '族群雷達' + ('歷史驗證' if p.get('backtest') else '')
+    if kind == 'paper_bot':
+        return [s('paper_bot.py')], '模擬帳戶：執行今天的流程'
     if kind == 'forward_test':
         return [s('forward_test.py')] + ['--send'] * send, '前瞻測試' + ('（推送）' if send else '')
     if kind == 'lab':
@@ -133,7 +135,7 @@ def build_command(kind: str, p: dict) -> tuple[list[str], str]:
 
 
 # 會打到證交所／櫃買的工作：同一時間只跑一個，避免請求過密被封鎖
-EXCHANGE_HEAVY = {'research_card', 'lab', 'forward_test', 'sector_radar'}
+EXCHANGE_HEAVY = {'research_card', 'lab', 'forward_test', 'sector_radar', 'paper_bot'}
 # 會改寫 portfolio.json 的工作：同一時間只跑一個
 WRITES_PORTFOLIO = {'record_trade', 'plan_new', 'plan_review', 'plan_cancel'}
 

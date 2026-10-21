@@ -32,6 +32,10 @@ class Config:
     slippage: float = 0.0          # 每日模擬用真實開盤價，不另加；歷史模擬建議 0.001
     ma_days: int = 120
     rev_months: int = 2
+    take_profit_pct: float | None = None      # 收盤 ≥ 成本 ×(1+此值) → 隔天停利；None＝不停利
+    take_profit_fraction: float = 1.0         # 停利賣出比例（0.5＝先賣一半，剩下照原本規則；每檔只停利一次）
+    rebuy_cooldown_days: int = 0              # 全部停利後，同一檔幾天內不再買（0＝仍符合條件就可以買回）
+    breakeven_after: float | None = None      # 收盤 ≥ 成本 ×(1+此值) 後，停損上移到成本價
 
 
 def fee(cfg: Config, amount: float) -> float:
@@ -52,6 +56,7 @@ class Bot:
     trades: list = field(default_factory=list)
     equity: list = field(default_factory=list)      # [{date, equity, cash, positions}]
     last_date: str | None = None
+    cooldown: dict = field(default_factory=dict)    # code → 這天（含）以前不再買進（停利後換股用）
 
     @classmethod
     def new(cls, cfg: Config) -> 'Bot':
@@ -60,12 +65,12 @@ class Bot:
     # ---------- 狀態存取 ----------
     def to_dict(self) -> dict:
         return {'cfg': asdict(self.cfg), 'cash': self.cash, 'positions': self.positions, 'pending': self.pending,
-                'trades': self.trades, 'equity': self.equity, 'last_date': self.last_date}
+                'trades': self.trades, 'equity': self.equity, 'last_date': self.last_date, 'cooldown': self.cooldown}
 
     @classmethod
     def from_dict(cls, d: dict) -> 'Bot':
         return cls(cfg=Config(**d['cfg']), cash=d['cash'], positions=d['positions'], pending=d['pending'],
-                   trades=d['trades'], equity=d['equity'], last_date=d['last_date'])
+                   trades=d['trades'], equity=d['equity'], last_date=d['last_date'], cooldown=d.get('cooldown', {}))
 
     # ---------- 每日步驟 ----------
     def execute(self, d: str, exec_price) -> list[dict]:
@@ -79,15 +84,28 @@ class Bot:
                 continue
             if o['side'] == 'sell':
                 p *= 1 - self.cfg.slippage
-                pos = self.positions.pop(o['code'])
-                amt = pos['shares'] * p
+                pos = self.positions[o['code']]
+                qty = min(o['shares'], pos['shares'])
+                partial = qty < pos['shares']
+                amt = qty * p
                 cost = fee(self.cfg, amt) + sell_tax(self.cfg, o['code'], amt)
+                basis = pos['cost'] * qty / pos['shares']
                 self.cash += amt - cost
-                pnl = amt - cost - pos['cost']
-                t = {'date': d, 'side': 'sell', 'code': o['code'], 'shares': pos['shares'], 'price': round(p, 2),
-                     'amount': round(amt, 0), 'fees': cost, 'pnl': round(pnl, 0), 'return': pnl / pos['cost'],
-                     'entry_date': pos['entry_date'], 'reason': o['reason'],
-                     'r_multiple': pnl / max(1e-9, (pos['entry'] - pos['stop']) * pos['shares'])}
+                pnl = amt - cost - basis
+                init_stop = pos.get('init_stop', pos['stop'])
+                t = {'date': d, 'side': 'sell', 'code': o['code'], 'shares': qty, 'price': round(p, 2),
+                     'amount': round(amt, 0), 'fees': cost, 'pnl': round(pnl, 0), 'return': pnl / basis,
+                     'entry_date': pos['entry_date'], 'reason': o['reason'] + ('（部分）' if partial else ''),
+                     'r_multiple': pnl / max(1e-9, (pos['entry'] - init_stop) * qty)}
+                if partial:
+                    pos['shares'] -= qty
+                    pos['cost'] -= basis
+                    pos['tp_done'] = True
+                else:
+                    self.positions.pop(o['code'])
+                    if o.get('kind') == 'take_profit' and self.cfg.rebuy_cooldown_days:
+                        until = pd.Timestamp(d) + pd.Timedelta(days=self.cfg.rebuy_cooldown_days)
+                        self.cooldown[o['code']] = until.strftime('%Y-%m-%d')
             else:
                 p *= 1 + self.cfg.slippage
                 shares = o['shares']
@@ -100,7 +118,7 @@ class Bot:
                 self.cash -= amt + c
                 stop = round(p * (1 - self.cfg.stop_pct), 2)
                 self.positions[o['code']] = {'shares': shares, 'entry': round(p, 2), 'entry_date': d,
-                                             'stop': stop, 'cost': amt + c}
+                                             'stop': stop, 'init_stop': stop, 'cost': amt + c}
                 t = {'date': d, 'side': 'buy', 'code': o['code'], 'shares': shares, 'price': round(p, 2),
                      'amount': round(amt, 0), 'fees': c, 'stop': stop, 'reason': o['reason']}
             self.trades.append(t)
@@ -150,26 +168,36 @@ class Bot:
         # 出場
         for code, pos in self.positions.items():
             c = ctx.close(code)
-            reason = None
+            cfg = self.cfg
+            if c is not None and cfg.breakeven_after and c >= pos['entry'] * (1 + cfg.breakeven_after):
+                pos['stop'] = max(pos['stop'], pos['entry'])          # 漲夠了，停損上移到成本
+            reason, qty, kind = None, pos['shares'], 'exit'
             if c is not None and c <= pos['stop']:
                 reason = f"跌破停損 {pos['stop']}"
             elif c is not None and ctx.ma(code) is not None and c < ctx.ma(code):
-                reason = f'跌破 {self.cfg.ma_days} 日線'
+                reason = f'跌破 {cfg.ma_days} 日線'
             elif ctx.revenue_down(code):
-                reason = f'營收連 {self.cfg.rev_months} 個月年減'
+                reason = f'營收連 {cfg.rev_months} 個月年減'
+            elif c is not None and cfg.take_profit_pct and not pos.get('tp_done') \
+                    and c >= pos['entry'] * (1 + cfg.take_profit_pct):
+                reason, kind = f'停利 +{cfg.take_profit_pct:.0%}', 'take_profit'
+                if cfg.take_profit_fraction < 1 and pos['shares'] > 1:
+                    qty = max(1, math.floor(pos['shares'] * cfg.take_profit_fraction))
             if reason:
-                orders.append({'side': 'sell', 'code': code, 'shares': pos['shares'], 'reason': reason,
+                orders.append({'side': 'sell', 'code': code, 'shares': qty, 'reason': reason, 'kind': kind,
                                'signal_date': d, 'ref_price': c})
-        selling = {o['code'] for o in orders}
+        selling = {o['code']: o['shares'] for o in orders}
         # 進場
-        kept = {c: p for c, p in self.positions.items() if c not in selling}
-        open_risk = sum(max(0.0, (ctx.close(c) or p['entry']) - p['stop']) * p['shares'] for c, p in kept.items())
+        open_risk = sum(max(0.0, (ctx.close(c) or p['entry']) - p['stop']) * (p['shares'] - selling.get(c, 0))
+                        for c, p in self.positions.items())
         # 可用現金 = 現有現金 + 明天賣出的預估所得（先賣後買）
         cash = self.cash + sum((ctx.close(o['code']) or 0) * o['shares'] * (1 - self.cfg.tax_rate) for o in orders)
         for cand in ctx.candidates:
             code, price = cand['code'], cand['close']
             if code in self.positions or not price or price <= 0:
                 continue
+            if self.cooldown.get(code, '') >= d:
+                continue                       # 剛停利出場，冷卻期內不買回（換股）
             stop = price * (1 - self.cfg.stop_pct)
             per_share = (price - stop) + price * self.cfg.fee_rate + stop * (self.cfg.fee_rate + self.cfg.tax_rate)
             by_risk = math.floor(eq * self.cfg.max_risk_per_trade / per_share)
@@ -206,6 +234,8 @@ def exit_kind(reason: str) -> str:
         return '跌破 120 日線'
     if reason.startswith('營收'):
         return '營收連 2 月年減'
+    if reason.startswith('停利'):
+        return '停利'
     return reason
 
 

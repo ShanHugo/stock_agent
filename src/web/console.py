@@ -254,6 +254,38 @@ def radar_latest():
     return {'exists': True, **json.loads(path.read_text(encoding='utf-8'))}
 
 
+PAPER = ROOT / 'state' / 'paper_bot'
+
+
+def _read_json(path: Path):
+    return json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
+
+
+@app.get('/api/paper')
+def paper():
+    view = _read_json(PAPER / 'latest.json')
+    paused = PAPER / 'paused'
+    return {'exists': view is not None, 'view': view, 'backtest': _read_json(PAPER / 'backtest.json'),
+            'luck': _read_json(PAPER / 'luck.json'),
+            'paused': paused.exists(), 'paused_info': paused.read_text(encoding='utf-8').strip() if paused.exists() else None}
+
+
+class PauseRequest(BaseModel):
+    paused: bool
+
+
+@app.post('/api/paper/pause')
+def paper_pause(req: PauseRequest):
+    """暫停：每日排程照常啟動，但模擬帳戶不交易、不推送；恢復後從上次處理的交易日接續（中間的交易日會補跑）。"""
+    flag = PAPER / 'paused'
+    if req.paused:
+        PAPER.mkdir(parents=True, exist_ok=True)
+        flag.write_text(f'{datetime.now():%Y-%m-%d %H:%M} 由操作台暫停', encoding='utf-8')
+    else:
+        flag.unlink(missing_ok=True)
+    return {'paused': flag.exists()}
+
+
 @app.get('/api/forward')
 def forward():
     path = ROOT / 'state' / 'forward' / 'latest.json'
