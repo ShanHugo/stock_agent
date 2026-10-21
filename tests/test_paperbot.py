@@ -66,6 +66,16 @@ class TestBot(unittest.TestCase):
         self.bot.execute('2026-10-21', lambda c: None)
         self.assertEqual([o['code'] for o in self.bot.pending], ['H'])
 
+    def test_max_per_theme(self):
+        bot = Bot.new(Config(capital=100_000, max_total_risk=0.5, max_per_theme=2))
+        self._hold(bot, code='M1', shares=10, entry=100.0)                      # 已持有一檔記憶體
+        themes = {'M1': {'記憶體'}, 'M2': {'記憶體'}, 'M3': {'記憶體', '晶圓代工'}, 'P1': {'PCB載板'}, 'X': set()}.get
+        cands = [{'code': c, 'close': 50.0, 'rev_yoy': 100 - i} for i, c in enumerate(['M2', 'M3', 'P1', 'X'])]
+        c = ctx({'M1': 100.0}, ma={'M1': 90.0}, cands=cands)
+        c.themes = lambda code: themes(code, set())
+        got = [o['code'] for o in bot.decide('2026-10-20', c) if o['side'] == 'buy']
+        self.assertEqual(got, ['M2', 'P1', 'X'])       # M3 屬於已滿 2 檔的記憶體 → 跳過；沒有族群的 X 不受限
+
     def test_unfilled_sell_not_duplicated(self):
         self._hold(self.bot, code='L', shares=10, entry=100.0)
         self.bot.decide('2026-10-20', ctx({'L': 85.0}, ma={'L': 100.0}))           # 跌破停損 → 賣單

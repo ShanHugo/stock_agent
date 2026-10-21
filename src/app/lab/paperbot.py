@@ -36,6 +36,7 @@ class Config:
     take_profit_fraction: float = 1.0         # 停利賣出比例（0.5＝先賣一半，剩下照原本規則；每檔只停利一次）
     rebuy_cooldown_days: int = 0              # 全部停利後，同一檔幾天內不再買（0＝仍符合條件就可以買回）
     breakeven_after: float | None = None      # 收盤 ≥ 成本 ×(1+此值) 後，停損上移到成本價
+    max_per_theme: int | None = None          # 同一族群最多同時持有幾檔（一檔屬於多個族群時，任一族群滿了就不買）
 
 
 def fee(cfg: Config, amount: float) -> float:
@@ -195,6 +196,13 @@ class Bot:
         # 進場
         open_risk = sum(max(0.0, (ctx.close(c) or p['entry']) - p['stop']) * (p['shares'] - selling.get(c, 0))
                         for c, p in self.positions.items())
+        # 族群持股數（不含明天全部賣出的持股）
+        theme_of = ctx.themes or (lambda c: set())
+        theme_count: dict[str, int] = {}
+        for c, p in self.positions.items():
+            if selling.get(c, 0) < p['shares']:
+                for t in theme_of(c):
+                    theme_count[t] = theme_count.get(t, 0) + 1
         # 可用現金 = 現有現金 + 明天賣出的預估所得（先賣後買）
         cash = self.cash + sum((ctx.close(o['code']) or 0) * o['shares'] * (1 - self.cfg.tax_rate) for o in orders)
         for cand in ctx.candidates:
@@ -203,6 +211,9 @@ class Bot:
                 continue
             if self.cooldown.get(code, '') >= d:
                 continue                       # 剛停利出場，冷卻期內不買回（換股）
+            cap = self.cfg.max_per_theme
+            if cap and any(theme_count.get(t, 0) >= cap for t in theme_of(code)):
+                continue                       # 這檔所屬的族群已經持滿，看下一檔
             stop = price * (1 - self.cfg.stop_pct)
             per_share = (price - stop) + price * self.cfg.fee_rate + stop * (self.cfg.fee_rate + self.cfg.tax_rate)
             by_risk = math.floor(eq * self.cfg.max_risk_per_trade / per_share)
@@ -217,6 +228,8 @@ class Bot:
                 break                          # 總風險滿了
             open_risk += shares * per_share
             cash -= shares * price * (1 + self.cfg.fee_rate) + self.cfg.min_fee
+            for t in theme_of(code):
+                theme_count[t] = theme_count.get(t, 0) + 1
             orders.append({'side': 'buy', 'code': code, 'shares': shares, 'signal_date': d, 'ref_price': price,
                            'reason': f"營收動能：最新月營收年增 {cand['rev_yoy']:+.1f}%", 'stop_est': round(stop, 2)})
         self.pending.extend(orders)
@@ -230,6 +243,7 @@ class DayContext:
     ma: object                  # code -> 120 日均價或 None
     revenue_down: object        # code -> bool（最近 N 個已公布月份營收都年減）
     candidates: list            # [{code, close, rev_yoy}] 依營收年增由高到低，已符合營收動能
+    themes: object = None       # code -> 所屬族群 set（族群集中度限制用；沒給就不限制）
 
 
 def exit_kind(reason: str) -> str:

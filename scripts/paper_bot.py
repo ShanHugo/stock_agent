@@ -31,6 +31,7 @@ from src.app.alerts.portfolio import load_portfolio
 STATE = _ROOT / 'state' / 'paper_bot'
 FEE_DISCOUNT = 0.28
 MIN_FEE = 1.0
+MAX_PER_THEME = 2           # 同一族群最多同時持有 2 檔（2026-10-22 依 3 種設定 × 8 起始日比較選定）
 BREAKEVEN_AFTER = 0.20      # 方案 E：收盤漲到成本 +20% 後，停損上移到成本價（2026-10-21 依 5 方案 × 8 起始日比較選定）
 
 
@@ -41,7 +42,7 @@ def config_from_portfolio(slippage: float = 0.0) -> Config:
     return Config(capital=float(risk['capital']), max_risk_per_trade=risk.get('max_risk_per_trade', 0.03),
                   max_position_pct=risk.get('max_position_pct', 0.2), max_total_risk=risk.get('max_total_risk', 0.08),
                   fee_rate=0.001425 * FEE_DISCOUNT, min_fee=MIN_FEE, slippage=slippage,
-                  breakeven_after=BREAKEVEN_AFTER)
+                  breakeven_after=BREAKEVEN_AFTER, max_per_theme=MAX_PER_THEME)
 
 
 def revenue_panels(ds, index, columns):
@@ -62,6 +63,18 @@ def revenue_panels(ds, index, columns):
     return latest, pos2, neg2
 
 
+_THEMES: dict | None = None
+
+
+def theme_lookup():
+    """代號 → 所屬族群（櫃買產業價值鏈分類，只讀快取；族群雷達每天會補抓新上市與更新舊資料）。"""
+    global _THEMES
+    if _THEMES is None:
+        from src.app.lab.themes import load_code_themes
+        _THEMES = load_code_themes()
+    return lambda c: _THEMES.get(c, set())
+
+
 def make_context(d, prices_close, ma, latest, pos2, neg2, members):
     row_c, row_ma = prices_close.loc[d], ma.loc[d]
     ok = [c for c in members if pd.notna(row_c.get(c)) and pd.notna(row_ma.get(c))
@@ -70,7 +83,8 @@ def make_context(d, prices_close, ma, latest, pos2, neg2, members):
                    key=lambda x: -x['rev_yoy'])
     num = lambda s, c: (float(s[c]) if c in s.index and pd.notna(s[c]) else None)
     return DayContext(close=lambda c: num(row_c, c), ma=lambda c: num(row_ma, c),
-                      revenue_down=lambda c: bool(neg2.at[d, c]) if c in neg2.columns else False, candidates=cands)
+                      revenue_down=lambda c: bool(neg2.at[d, c]) if c in neg2.columns else False, candidates=cands,
+                      themes=theme_lookup())
 
 
 def pct(v, d=1):
@@ -333,6 +347,7 @@ def write_view(bot, cfg, s, start, bench, nm, now) -> None:
         'config': {'max_risk_per_trade': cfg.max_risk_per_trade, 'max_position_pct': cfg.max_position_pct,
                    'max_total_risk': cfg.max_total_risk, 'stop_pct': cfg.stop_pct, 'fee_discount': FEE_DISCOUNT,
                    'breakeven_after': cfg.breakeven_after, 'take_profit_pct': cfg.take_profit_pct,
+                   'max_per_theme': cfg.max_per_theme,
                    'min_fee': MIN_FEE},
         'positions': [named({'code': c, **p}) for c, p in bot.positions.items()],
         'pending': [named(o) for o in bot.pending],
@@ -417,8 +432,9 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
             seen = p.get('last_date') or p['entry_date']
             if (pd.Timestamp(bot.last_date) - pd.Timestamp(seen)).days >= 5:
                 L.append(f"  ⚠️ 自 {seen} 起沒有成交價（停牌或下市），模擬帳戶無法賣出，請自行確認這檔的狀況")
-    L.append('_模擬操作，不是買賣建議；真實下單請自行判斷。成交假設：隔天 09:30 即時報價（買用最佳賣價、賣用最佳買價；09:30 沒執行到則以開盤價），手續費 2.8 折（最低 1 元）。'
-             + (f'漲到成本 +{cfg.breakeven_after:.0%} 後停損移到成本價。' if cfg.breakeven_after else '') + '_')
+    L.append('_模擬操作，不是買賣建議；真實下單請自行判斷。成交假設：隔天 09:30 依盤中零股五檔（漲停買不到、跌停賣不掉；09:30 沒執行到則以開盤價），手續費 2.8 折（最低 1 元）。'
+             + (f'漲到成本 +{cfg.breakeven_after:.0%} 後停損移到成本價。' if cfg.breakeven_after else '')
+             + (f'同一族群最多 {cfg.max_per_theme} 檔。' if cfg.max_per_theme else '') + '_')
     text = '\n'.join(L)
     print(text)
     if dry_run:
