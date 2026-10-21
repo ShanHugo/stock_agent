@@ -90,10 +90,13 @@ def run_backtest(log) -> int:
     latest, pos2, neg2 = revenue_panels(ds, px.index, codes)
     days = px.loc['2018-06-01':].index
     bot = Bot.new(cfg)
+    px_prev = px.shift(1)
     for i, d in enumerate(days):
         ds_ = d.strftime('%Y-%m-%d')
-        row = px.loc[d]
-        bot.execute(ds_, lambda c: float(row[c]) if c in row.index and pd.notna(row[c]) else None)
+        row, prow = px.loc[d], px_prev.loc[d]
+        val = lambda s: (lambda c: float(s[c]) if c in s.index and pd.notna(s[c]) else None)
+        # 成交當天漲 ≥ 9.5% 的買單、跌 ≥ 9.5% 的賣單視為漲跌停無法成交
+        bot.execute(ds_, limit_gate(val(row), val(prow), {o['code']: o['side'] for o in bot.pending}))
         bot.mark(ds_, lambda c: float(row[c]) if c in row.index and pd.notna(row[c]) else None)
         members = [c for c in members_on(hist, d) if c in codes]
         bot.decide(ds_, make_context(d, px, ma, latest, pos2, neg2, members))
@@ -168,6 +171,151 @@ def raw_quote(d, field):
 
 
 PAUSED = STATE / 'paused'
+MIS_ODD = 'https://mis.twse.com.tw/stock/api/getOddInfo.jsp'   # 盤中零股即時報價（五檔價量、漲跌停價）
+LIMIT_MOVE = 0.095          # 沒有五檔資料時（開盤價補成交、歷史模擬）：開盤／成交較前收 ≥ 9.5% 視為漲停買不到、≤ -9.5% 視為跌停賣不掉
+
+
+def _levels(prices: str | None, vols: str | None) -> list[tuple[float, float]]:
+    ps = [p for p in (prices or '').split('_') if p not in ('', '-')]
+    vs = [v for v in (vols or '').split('_') if v not in ('', '-')]
+    return [(float(p), float(v)) for p, v in zip(ps, vs) if float(p) > 0 and float(v) > 0]
+
+
+def realtime_quotes(codes: list[str]) -> dict[str, dict]:
+    """證交所盤中零股即時報價（上市＋上櫃）：{代號: {date, time, last, asks, bids, limit_up, limit_down}}。
+    asks／bids 為 [(價格, 股數)] 由近到遠。代號不知道是上市或上櫃，兩個都查。"""
+    import requests
+    out = {}
+    num = lambda v: float(v) if v not in (None, '', '-') else None
+    for i in range(0, len(codes), 20):
+        chunk = codes[i:i + 20]
+        ex_ch = '|'.join(f'{m}_{c}.tw' for c in chunk for m in ('tse', 'otc'))
+        js = requests.get(MIS_ODD, params={'ex_ch': ex_ch, 'json': '1', 'delay': '0'},
+                          headers={'User-Agent': 'Mozilla/5.0'}, timeout=20).json()
+        for m in js.get('msgArray', []):
+            if m.get('c'):
+                out[m['c']] = {'date': m.get('d'), 'time': m.get('t'), 'last': num(m.get('z')),
+                               'asks': _levels(m.get('a'), m.get('f')), 'bids': _levels(m.get('b'), m.get('g')),
+                               'limit_up': num(m.get('u')), 'limit_down': num(m.get('w'))}
+    return out
+
+
+def fill_from_book(q: dict, side: str, shares: int) -> tuple[float | None, str]:
+    """依零股五檔模擬市價單：買進往上吃賣單、賣出往下吃買單，回傳（平均成交價, 說明）。
+    沒有對手單時：鎖漲停（買）／鎖跌停（賣）→ 成交不了；其他情況用最新成交價。五檔量不夠時，不足的部分以第五檔價計。"""
+    book = q['asks'] if side == 'buy' else q['bids']
+    if not book:
+        last = q.get('last')
+        if side == 'buy' and last and q.get('limit_up') and last >= q['limit_up']:
+            return None, '漲停鎖住，沒有賣單，買不到'
+        if side == 'sell' and last and q.get('limit_down') and last <= q['limit_down']:
+            return None, '跌停鎖住，沒有買單，賣不掉'
+        return (last, '五檔沒有掛單，以最新成交價計') if last else (None, '沒有報價（可能停牌）')
+    left, cost = shares, 0.0
+    for p, v in book:
+        take = min(left, v)
+        cost += take * p
+        left -= take
+        if left <= 0:
+            break
+    note = '零股五檔'
+    if left > 0:
+        cost += left * book[-1][0]
+        note = '零股五檔量不足，不足部分以第五檔價計'
+    return cost / shares, note
+
+
+def limit_gate(price_fn, prev_close_fn, sides: dict[str, str]):
+    """沒有五檔資料時的漲跌停近似：成交價較前收漲 ≥ 9.5% 的買單、跌 ≥ 9.5% 的賣單視為無法成交。"""
+    def gated(code):
+        p, prev = price_fn(code), prev_close_fn(code)
+        if p is None or not prev:
+            return p
+        if sides.get(code) == 'buy' and p >= prev * (1 + LIMIT_MOVE):
+            return None
+        if sides.get(code) == 'sell' and p <= prev * (1 - LIMIT_MOVE):
+            return None
+        return p
+    return gated
+
+
+def run_execute(log, dry_run: bool = False) -> int:
+    """09:30：用即時報價執行昨天收盤後排定的模擬單（買進用最佳賣價、賣出用最佳買價，沒有五檔才用最新成交價）。
+    沒有報價（停牌）時：賣單留著，等之後有報價再賣；買單取消（與開盤成交的規則相同）。
+    09:30 沒執行到（電腦沒開、不在盤中）的單，當天 16:50 收盤後改用開盤價補成交。"""
+    load_dotenv(_ROOT / '.env')
+    if PAUSED.exists():
+        print('[skip] 模擬帳戶已暫停')
+        return 0
+    path = STATE / 'state.json'
+    if not path.exists():
+        print('[skip] 還沒有模擬帳戶')
+        return 0
+    saved = json.loads(path.read_text(encoding='utf-8'))
+    bot = Bot.from_dict(saved)
+    if not bot.pending:
+        print('[skip] 沒有待執行的模擬單')
+        return 0
+    now = datetime.now(ZoneInfo('Asia/Taipei'))
+    today = now.strftime('%Y%m%d')
+    if not (9 * 60 + 5 <= now.hour * 60 + now.minute <= 13 * 60 + 25):
+        print('[skip] 不在盤中（09:05～13:25），留給收盤後以開盤價補成交')
+        return 0
+    if any(o.get('signal_date', '') >= now.strftime('%Y-%m-%d') for o in bot.pending):
+        print('[skip] 有今天收盤後才排定的單，要等下一個交易日才執行')
+        return 0
+    q = realtime_quotes([o['code'] for o in bot.pending])
+    if not any(v['date'] == today for v in q.values()):
+        print('[skip] 今天沒有即時報價（休市），模擬單留到下一個交易日')
+        return 0
+    orders = {o['code']: o for o in bot.pending}
+    notes = {}
+
+    def price(code):
+        v = q.get(code)
+        if not v or v['date'] != today:
+            notes[code] = '沒有今天的報價（可能停牌）'
+            return None
+        p, notes[code] = fill_from_book(v, orders[code]['side'], orders[code]['shares'])
+        return p
+    executed = bot.execute(now.strftime('%Y-%m-%d'), price)
+    for t in executed:
+        t['fill'] = f"{now:%H:%M} {notes.get(t['code'], '')}"
+    not_filled = [(c, notes.get(c, '')) for c, o in orders.items() if c not in {t['code'] for t in executed}]
+    view_path = STATE / 'latest.json'
+    view = json.loads(view_path.read_text(encoding='utf-8')) if view_path.exists() else {}
+    names = {x['code']: x.get('name', '') for k in ('positions', 'pending', 'trades') for x in view.get(k, [])}
+    nm = lambda c: f"{c} {names.get(c, '')}".strip()
+    L = [f"## 模擬帳戶 {now:%m/%d %H:%M} 成交（即時報價）"]
+    L += [f"- {'買進' if t['side'] == 'buy' else '賣出'} {nm(t['code'])} {t['shares']} 股 @ {t['price']:,.2f}"
+          + (f"，停損 {t['stop']:,.2f}" if t['side'] == 'buy' else f"，損益 {t['pnl']:+,.0f} 元（{t['reason']}）")
+          for t in executed] or ['- 沒有成交']
+    if not_filled:
+        L.append('\n**沒有成交**（買單取消；賣單留到下一個交易日再試）')
+        L += [f"- {'買進' if orders[c]['side'] == 'buy' else '賣出'} {nm(c)} {orders[c]['shares']} 股：{why}" for c, why in not_filled]
+    L.append(f"現金 {bot.cash:,.0f} 元。_模擬操作，不是買賣建議；依盤中零股五檔模擬市價單（買往上吃賣單、賣往下吃買單）。_")
+    text = '\n'.join(L)
+    print(text)
+    if dry_run:
+        print('[dry-run] 未寫入帳戶、未推送')
+        return 0
+    data = bot.to_dict()
+    data['start'], data['updated'] = saved.get('start'), now.isoformat(timespec='seconds')
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+    if view:
+        # 只更新操作台會變的部分（淨值走勢等收盤後再算）
+        named = lambda x: {**x, 'name': names.get(x['code'], '')}
+        view.update(updated=data['updated'], cash=round(bot.cash, 2),
+                    positions=[named({'code': c, **p}) for c, p in bot.positions.items()],
+                    pending=[named(o) for o in bot.pending], trades=[named(t) for t in bot.trades[-200:]][::-1])
+        view_path.write_text(json.dumps(view, ensure_ascii=False, indent=1, default=float), encoding='utf-8')
+    if (executed or not_filled) and os.getenv('PAPER_BOT_AUTO_SEND', '').strip() == '1':
+        from src.app.alerts.notify import send_discord
+        webhook = (os.getenv('PAPER_BOT_WEBHOOK_URL') or os.getenv('DISCORD_WEBHOOK_URL') or '').strip()
+        if webhook:
+            send_discord(webhook, text)
+            print('[sent] 已推送到 Discord')
+    return 0
 
 
 def write_view(bot, cfg, s, start, bench, nm, now) -> None:
@@ -225,7 +373,11 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
         ds_ = d.strftime('%Y-%m-%d')
         opens, closes = raw_quote(d, 'open'), raw_quote(d, 'close')
         get = lambda s: (lambda c: float(s[c]) if c in s.index and pd.notna(s[c]) and s[c] > 0 else None)
-        executed += bot.execute(ds_, get(opens))
+        i = px.index.get_loc(d)
+        prev_closes = raw_quote(px.index[i - 1], 'close') if i > 0 else pd.Series(dtype=float)
+        sides = {o['code']: o['side'] for o in bot.pending}
+        # 09:30 沒執行到的單：以開盤價補成交，開盤漲停（≥ +9.5%）買不到、跌停（≤ -9.5%）賣不掉
+        executed += bot.execute(ds_, limit_gate(get(opens), get(prev_closes), sides))
         bot.dividends(ds_, ev[ev['date'] == d])
         bot.mark(ds_, get(closes))
         members = [c for c in members_on(hist, d) if c in codes]
@@ -252,7 +404,7 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
               + (f"，停損 {t['stop']:,.2f}" if t['side'] == 'buy' else f"，損益 {t['pnl']:+,.0f} 元（{t['reason']}）")
               for t in executed]
     if bot.pending:
-        L.append('\n**下一個交易日開盤要執行（模擬單）**')
+        L.append('\n**下一個交易日 09:30 要執行（模擬單）**')
         L += [f"- {'買進' if o['side'] == 'buy' else '賣出'} {nm(o['code'])} {o['shares']} 股（參考收盤 {o['ref_price']:,.2f}）"
               f"：{o['reason']}" + (f"，停損約 {o['stop_est']:,.2f}" if o['side'] == 'buy' else '') for o in bot.pending]
     else:
@@ -265,7 +417,7 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
             seen = p.get('last_date') or p['entry_date']
             if (pd.Timestamp(bot.last_date) - pd.Timestamp(seen)).days >= 5:
                 L.append(f"  ⚠️ 自 {seen} 起沒有成交價（停牌或下市），模擬帳戶無法賣出，請自行確認這檔的狀況")
-    L.append('_模擬操作，不是買賣建議；真實下單請自行判斷。成交假設：隔天開盤價，手續費 2.8 折（最低 1 元）。'
+    L.append('_模擬操作，不是買賣建議；真實下單請自行判斷。成交假設：隔天 09:30 即時報價（買用最佳賣價、賣用最佳買價；09:30 沒執行到則以開盤價），手續費 2.8 折（最低 1 元）。'
              + (f'漲到成本 +{cfg.breakeven_after:.0%} 後停損移到成本價。' if cfg.breakeven_after else '') + '_')
     text = '\n'.join(L)
     print(text)
@@ -295,8 +447,11 @@ def main() -> int:
     p.add_argument('--send', action='store_true', help='有成交或新單時推送 Discord')
     p.add_argument('--reset', action='store_true', help='重新開始模擬帳戶')
     p.add_argument('--dry-run', action='store_true', help='只顯示，不寫入帳戶、不推送')
+    p.add_argument('--execute-now', action='store_true', help='09:30：用即時報價執行待執行的模擬單')
     args = p.parse_args()
     log = lambda m: print(m if m.startswith('[') else f'[data] {m}', file=sys.stderr)
+    if args.execute_now:
+        return run_execute(log, args.dry_run)
     return run_backtest(log) if args.backtest else run_daily(log, args.send, args.reset, args.dry_run)
 
 

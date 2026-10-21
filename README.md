@@ -41,6 +41,10 @@ pip install -r requirements.txt
 - 複製 `portfolio.example.json` 為 `portfolio.json`，填入持股與提醒規則
 - 選用：安裝 [Ollama](https://ollama.com) 並下載 `OLLAMA_MODEL`（預設 `qwen3.5:9b`）以產生一句摘要
 
+### 排程失敗通知
+每個排程執行完都會記錄結果（`state/scheduler/<名稱>.json`）；失敗時立刻推送「⚠️ 排程失敗」與最後幾行紀錄到 `DISCORD_WEBHOOK_URL`。
+電腦沒開等原因導致排程完全沒執行時，隔天 08:30 盤前簡報的「抓取失敗」區會列出。測試時設環境變數 `TASK_STATUS_NO_SEND=1` 可只印出不推送。
+
 ### 本機操作台（網頁）
 雙擊 `scripts\start_console.cmd`（或執行 `.venv\Scripts\python.exe -m src.web.console --open`），瀏覽器會開啟 http://127.0.0.1:8765 。
 關掉那個黑色視窗就停止。只聽本機 127.0.0.1，同網路的其他裝置連不進來。
@@ -154,6 +158,19 @@ python scripts/sector_radar.py --backtest   # 歷史驗證：每 20 / 60 天持�
 
 **族群新聞**：盤前簡報會抓鉅亨網過去 18 小時的台股新聞與頭條，依族群歸類，並由本機模型為新聞最多的 6 個族群各寫 1–2 句整理。
 整理中出現新聞沒有的數字、或出現「建議、買進、布局」等字眼時整段捨棄，只列標題與連結。
+
+**模擬帳戶**（依營收動能規則、你的風險設定與券商手續費，用模擬資金逐日操作；不會真的下單）：
+```bash
+python scripts/paper_bot.py                  # 收盤後：記帳、檢查出場、排定下一個交易日的單（排程：平日 16:50）
+python scripts/paper_bot.py --execute-now    # 盤中：用證交所即時報價執行待執行的單（排程：平日 09:30）
+python scripts/paper_bot.py --backtest       # 歷史模擬 2018 年至今
+python scripts/paper_bot.py --dry-run        # 只顯示，不寫入帳戶、不推送
+```
+- 進場：最近 2 個已公布月份營收都年增、站上 120 日線，依營收年增率由高到低；部位依 `portfolio.json` 的 `risk` 計算。
+- 出場：跌破停損（買價下方 10%）、跌破 120 日線、營收連 2 月年減；收盤漲到成本 +20% 後停損上移到成本價。
+- 成交：09:30 依證交所盤中零股五檔模擬市價單（買往上吃賣單、賣往下吃買單）；鎖漲停沒有賣單買不到、鎖跌停沒有買單賣不掉。
+  09:30 沒執行到則收盤後以開盤價補成交（開盤較前收 ≥ +9.5% 視為漲停買不到、≤ -9.5% 視為跌停賣不掉；歷史模擬同此規則）。
+- 推送：`.env` 設 `PAPER_BOT_WEBHOOK_URL`（專用頻道）與 `PAPER_BOT_AUTO_SEND=1`；暫停：操作台「模擬帳戶」分頁，或建立 `state/paper_bot/paused` 檔案。
 
 **前瞻測試**（用真實的未來資料驗證回測結果）：
 ```bash

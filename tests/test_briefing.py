@@ -192,7 +192,7 @@ class TestCompose(unittest.TestCase):
             fetch_html=lambda url: FOMC_HTML if 'federalreserve' in url else BEA_HTML,
             fetch_twse=lambda path: ([{'Date': '1151023', 'Code': '0050', 'Name': '元大台灣50', 'Exdividend': '息',
                                        'CashDividend': '1.0'}] if 'TWT48U' in path else []),
-            fetch_feed=fake_feed, fetch_cnyes=fake_cnyes, radar_path=None, **kw)
+            fetch_feed=fake_feed, fetch_cnyes=fake_cnyes, radar_path=None, paper_path=None, scheduler_dir=None, **kw)
 
     def test_full_briefing(self):
         b = self.build([Holding(symbol='0050', name='元大台灣50', shares=100, cost=95, stop_price=99.5)])
@@ -216,7 +216,7 @@ class TestCompose(unittest.TestCase):
             raise ConnectionError('down')
         b = build_briefing(pf, now=datetime(2026, 10, 21, 8, 30, tzinfo=TPE), price_fetcher=prices,
                            default_tw_fee_bps=1, fetch_taifex=boom, fetch_html=boom, fetch_twse=boom,
-                           fetch_feed=boom, fetch_cnyes=boom, radar_path=None)
+                           fetch_feed=boom, fetch_cnyes=boom, radar_path=None, paper_path=None, scheduler_dir=None)
         txt = format_briefing(b)
         self.assertIn('抓取失敗', txt)
         self.assertIn('鉅亨網新聞', txt)
@@ -244,6 +244,46 @@ class TestRadarSection(unittest.TestCase):
         self.assertIn('排名最後：IC設計', txt)
         self.assertIn('t 值 +0.8', txt)
         self.assertIn('不是買賣建議', txt)
+
+
+class TestPaperOrdersSection(unittest.TestCase):
+    def test_load_and_format(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from src.app.briefing.compose import load_paper_orders, format_paper_orders
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'latest.json'
+            self.assertEqual(load_paper_orders(p), [])
+            p.write_text(json.dumps({'pending': [
+                {'side': 'buy', 'code': '2408', 'name': '南亞科', 'shares': 5, 'ref_price': 436.5, 'reason': '營收動能', 'stop_est': 392.85},
+                {'side': 'sell', 'code': '3311', 'name': '閎暉', 'shares': 53, 'ref_price': 40.0, 'reason': '跌破 120 日線'}]},
+                ensure_ascii=False), encoding='utf-8')
+            txt = '\n'.join(format_paper_orders(load_paper_orders(p)))
+        self.assertIn('今天 09:30 要執行', txt)
+        self.assertIn('買進 2408 南亞科 5 股（昨收 436.50）', txt)
+        self.assertIn('賣出 3311 閎暉 53 股', txt)
+        self.assertEqual(format_paper_orders([]), [])
+
+
+class TestSchedulerProblems(unittest.TestCase):
+    def test_missed_and_failed(self):
+        import json
+        import tempfile
+        from datetime import date
+        from pathlib import Path
+        from src.app.briefing.compose import scheduler_problems
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            w = lambda n, t, rc: (p / f'{n}.json').write_text(json.dumps({'name': n, 'time': t, 'rc': rc}), encoding='utf-8')
+            w('paper_exec', '2026-10-22T09:30:05+08:00', 0)        # 正常
+            w('check_alerts', '2026-10-20T14:30:05+08:00', 0)      # 前一個交易日（10/22）沒執行
+            w('forward_test', '2026-10-22T16:30:09+08:00', 1)      # 失敗
+            out = scheduler_problems(p, date(2026, 10, 22))
+        self.assertEqual(len(out), 2)
+        self.assertIn('沒有執行：14:30 持股提醒（最後一次 10/20', out[0])
+        self.assertIn('失敗：16:30 前瞻測試', out[1])
+        self.assertEqual(scheduler_problems(None, date(2026, 10, 22)), [])
 
 
 class TestNewsWindow(unittest.TestCase):

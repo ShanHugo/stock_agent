@@ -83,6 +83,8 @@ class Bot:
                     keep.append(o)
                 continue
             if o['side'] == 'sell':
+                if o['code'] not in self.positions:
+                    continue                  # 已經賣掉了（保險：避免重複賣單）
                 p *= 1 - self.cfg.slippage
                 pos = self.positions[o['code']]
                 qty = min(o['shares'], pos['shares'])
@@ -165,8 +167,11 @@ class Bot:
         """收盤後決定次一交易日的單。回傳新排定的單。"""
         orders = []
         eq = self.equity[-1]['equity'] if self.equity else self.cash
-        # 出場
+        # 出場（已經有待執行賣單的持股——例如跌停或停牌沒賣掉的——不再重複排單）
+        waiting = {o['code'] for o in self.pending if o['side'] == 'sell'}
         for code, pos in self.positions.items():
+            if code in waiting:
+                continue
             c = ctx.close(code)
             cfg = self.cfg
             if c is not None and cfg.breakeven_after and c >= pos['entry'] * (1 + cfg.breakeven_after):

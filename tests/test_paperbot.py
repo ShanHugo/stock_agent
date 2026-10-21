@@ -66,6 +66,17 @@ class TestBot(unittest.TestCase):
         self.bot.execute('2026-10-21', lambda c: None)
         self.assertEqual([o['code'] for o in self.bot.pending], ['H'])
 
+    def test_unfilled_sell_not_duplicated(self):
+        self._hold(self.bot, code='L', shares=10, entry=100.0)
+        self.bot.decide('2026-10-20', ctx({'L': 85.0}, ma={'L': 100.0}))           # 跌破停損 → 賣單
+        self.bot.execute('2026-10-21', lambda c: None)                               # 跌停賣不掉，賣單留著
+        self.bot.mark('2026-10-21', lambda c: 80.0)
+        self.bot.decide('2026-10-21', ctx({'L': 80.0}, ma={'L': 100.0}))           # 仍符合出場，但不重複排單
+        self.assertEqual([o['code'] for o in self.bot.pending], ['L'])
+        self.bot.execute('2026-10-22', lambda c: 79.0)
+        self.assertEqual(self.bot.positions, {})
+        self.assertEqual(len([t for t in self.bot.trades if t['side'] == 'sell']), 1)
+
     def test_dividend_cash_and_stop_adjust(self):
         self.bot.positions['D'] = {'shares': 100, 'entry': 50, 'entry_date': '2026-10-01', 'stop': 45, 'cost': 5001}
         cash0 = self.bot.cash

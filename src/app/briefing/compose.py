@@ -26,7 +26,9 @@ def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, defaul
                    fetch_taifex=src.fetch_taifex, fetch_html=src.fetch_html,
                    fetch_twse=src.fetch_twse_openapi, fetch_feed=news_mod.fetch_feed,
                    fetch_cnyes=requests.get, include_news: bool = True,
-                   radar_path: Path | None = Path('state/radar/latest.json')) -> dict:
+                   radar_path: Path | None = Path('state/radar/latest.json'),
+                   paper_path: Path | None = Path('state/paper_bot/latest.json'),
+                   scheduler_dir: Path | None = Path('state/scheduler')) -> dict:
     today = now.date()
     errors: list[str] = []
     b = {'date': today, 'errors': errors, 'limitations': list(LIMITATIONS)}
@@ -76,6 +78,8 @@ def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, defaul
 
     b['news'] = news_mod.collect_news(portfolio, now, errors, fetch=fetch_feed) if include_news else None
     b['radar'] = load_radar(radar_path, today)
+    b['paper_orders'] = load_paper_orders(paper_path)
+    errors.extend(scheduler_problems(scheduler_dir, news_mod.news_since(now).date()))
     b['sector_news'] = None
     if include_news:
         from ..lab.themes import load_code_themes
@@ -108,6 +112,54 @@ def load_radar(path: Path | None, today: date) -> dict | None:
     if (today - date.fromisoformat(r['date'])).days > RADAR_MAX_AGE_DAYS or not r.get('rows'):
         return None
     return r
+
+
+DAILY_TASKS = {'paper_exec': '09:30 模擬帳戶成交', 'check_alerts': '14:30 持股提醒', 'forward_test': '16:30 前瞻測試',
+               'sector_radar': '16:45 族群雷達', 'paper_bot': '16:50 模擬帳戶收盤'}
+
+
+def scheduler_problems(state_dir: Path | None, prev_session: date) -> list[str]:
+    """前一個交易日應該執行的排程：沒執行（例如電腦沒開）或執行失敗的，列出來。
+    還沒有任何紀錄的排程（剛設定好）不算。"""
+    if not state_dir or not state_dir.exists():
+        return []
+    out = []
+    for name, label in DAILY_TASKS.items():
+        path = state_dir / f'{name}.json'
+        if not path.exists():
+            continue
+        try:
+            s = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        ran = datetime.fromisoformat(s['time']).date()
+        if ran < prev_session:
+            out.append(f'排程沒有執行：{label}（最後一次 {ran:%m/%d}；電腦當時可能沒開）')
+        elif s.get('rc'):
+            out.append(f'排程失敗：{label}（{ran:%m/%d}，結束代碼 {s["rc"]}；詳見 logs\\{name}.log）')
+    return out
+
+
+def load_paper_orders(path: Path | None) -> list[dict]:
+    """模擬帳戶前一天收盤後排定、今天 09:30 要執行的單（scripts/paper_bot.py 寫的 latest.json）。"""
+    if not path or not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding='utf-8')).get('pending', [])
+    except (OSError, ValueError):
+        return []
+
+
+def format_paper_orders(orders: list[dict]) -> list[str]:
+    if not orders:
+        return []
+    lines = ['', '**模擬帳戶今天 09:30 要執行（模擬單）**']
+    for o in orders:
+        side = '買進' if o['side'] == 'buy' else '賣出'
+        extra = f"，停損約 {o['stop_est']:,.2f}" if o['side'] == 'buy' and o.get('stop_est') else ''
+        lines.append(f"- {side} {o['code']} {o.get('name', '')} {o['shares']} 股（昨收 {o['ref_price']:,.2f}）：{o['reason']}{extra}")
+    lines.append('_09:30 以即時報價成交後會推送到模擬帳戶頻道；模擬操作，不是買賣建議。_')
+    return lines
 
 
 def format_radar(r: dict | None) -> list[str]:
@@ -189,6 +241,7 @@ def format_briefing(b: dict, narration: str | None = None) -> str:
     for a in b.get('announcements', []):
         lines.append(f"- 重大訊息 {a['code']} {a['name']}：{a['subject']}")
 
+    lines += format_paper_orders(b.get('paper_orders', []))
     lines += format_radar(b.get('radar'))
     lines += sector_news.format_section(b.get('sector_news'), src.TPE)
     if b.get('news'):

@@ -291,7 +291,7 @@ button.b.mini { padding: 3px 10px; font-size: 13px; }
     <div id="pp-chart"></div>
   </div>
   <div class="row">
-    <div class="card"><h2>下一個交易日開盤要執行</h2><div class="scroll"><table id="pp-pending"></table></div></div>
+    <div class="card"><h2>下一個交易日 09:30 要執行</h2><div class="scroll"><table id="pp-pending"></table></div></div>
     <div class="card"><h2>目前持股</h2><div class="scroll"><table id="pp-positions"></table></div></div>
   </div>
   <div class="card"><h2>交易紀錄</h2><div class="scroll" style="max-height:420px;overflow-y:auto"><table id="pp-trades"></table></div></div>
@@ -491,7 +491,7 @@ function lineChart(points, series) {
 async function loadPaper() {
   let d; try { d = await api('/api/paper'); } catch (e) { $('pp-rules').innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
   paperPaused = d.paused;
-  $('pp-state').innerHTML = d.paused ? '<span class="tag warn">已暫停</span>' : '<span class="tag ok">運作中（平日 16:50）</span>';
+  $('pp-state').innerHTML = d.paused ? '<span class="tag warn">已暫停</span>' : '<span class="tag ok">運作中（平日 09:30 成交、16:50 收盤記帳與排單）</span>';
   $('pp-pause').textContent = d.paused ? '恢復模擬帳戶' : '暫停模擬帳戶';
   if (!d.exists) { $('pp-rules').textContent = '還沒有模擬帳戶。按「立即執行今天的流程」建立。'; return; }
   const v = d.view, s = v.summary, c = v.config;
@@ -500,7 +500,7 @@ async function loadPaper() {
     + `每筆最多虧 ${plain(c.max_risk_per_trade)}、單一個股 ≤ ${plain(c.max_position_pct)}、總風險 ≤ ${plain(c.max_total_risk)}、停損設在買價下方 ${plain(c.stop_pct)}；`
     + (c.breakeven_after ? `收盤漲到成本 +${plain(c.breakeven_after)} 後，停損上移到成本價（保本）；` : '')
     + (c.take_profit_pct ? `漲到 +${plain(c.take_profit_pct)} 停利；` : '')
-    + `跌破停損、跌破 120 日線或營收連 2 月年減就賣。以隔天開盤價成交，手續費 ${+(c.fee_discount * 10).toFixed(2)} 折（最低 ${c.min_fee} 元）。這是模擬，不是買賣建議。`
+    + `跌破停損、跌破 120 日線或營收連 2 月年減就賣。隔天 09:30 以即時報價成交（買用最佳賣價、賣用最佳買價；沒執行到則以開盤價），手續費 ${+(c.fee_discount * 10).toFixed(2)} 折（最低 ${c.min_fee} 元）。這是模擬，不是買賣建議。`
     + (d.paused ? `　暫停資訊：${d.paused_info}` : '');
   const value = v.positions.reduce((a, p) => a + p.shares * (p.last || p.entry), 0);
   $('pp-kpis').innerHTML = [
@@ -526,7 +526,7 @@ async function loadPaper() {
       <td class="num">${t.shares ?? ''}</td><td class="num">${t.price ? fmt(t.price) : ''}</td><td class="num">${t.amount != null ? fmt(t.amount, 0) : ''}</td>
       <td class="num">${t.fees != null ? fmt(t.fees, 0) : ''}</td><td class="num ${cls(t.pnl)}">${t.pnl != null ? fmt(t.pnl, 0) + `（${pct(t.return)}）` : ''}</td>
       <td style="white-space:normal">${esc(t.reason || (t.from_shares ? `${t.from_shares} 股換成 ${t.shares} 股` : ''))}</td></tr>`).join('')
-    : '<tr><td class="hint">還沒有成交。第一筆模擬單會在下一個交易日開盤成交。</td></tr>';
+    : '<tr><td class="hint">還沒有成交。第一筆模擬單會在下一個交易日 09:30 成交。</td></tr>';
   const b = d.backtest && d.backtest.summary, L = d.luck && d.luck.runs;
   let h = '';
   if (b) h += `<p>單次模擬：年化 ${pct(b.cagr)}（0050 ${pct(b.bench_cagr)}），最大回撤 ${pct(b.max_drawdown)}（0050 ${pct(b.bench_max_drawdown)}），`
