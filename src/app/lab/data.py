@@ -80,18 +80,23 @@ def load_prices(codes: list[str], start: str, end: str, refresh: bool = False, f
     return df
 
 
-def load_revenue(codes: list[str], start: pd.Period, end: pd.Period, today: date, progress=None) -> pd.DataFrame:
+def load_revenue(codes: list[str], start: pd.Period, end: pd.Period, today: date, progress=None,
+                 markets=('sii',)) -> pd.DataFrame:
+    """markets：'sii' 上市、'otc' 上櫃（公開資訊觀測站的分類）。"""
     rows = {}
     m = start
     while m <= end:
         if progress:
             progress(f'月營收 {m}')
-        try:
-            df = rs.monthly_revenue(m.year, m.month, today=today)
-            sub = df[df['code'].isin(codes)].set_index('code')['yoy_pct']
-            rows[m] = sub
-        except rs.NoData:
-            pass
+        parts = []
+        for mk in markets:
+            try:
+                parts.append(rs.monthly_revenue(m.year, m.month, today=today, market=mk))
+            except rs.NoData:
+                pass
+        if parts:
+            df = pd.concat(parts).drop_duplicates('code')
+            rows[m] = df[df['code'].isin(codes)].set_index('code')['yoy_pct']
         m += 1
     out = pd.DataFrame(rows).T.reindex(columns=codes)
     out.index = pd.PeriodIndex(out.index, freq='M')
@@ -129,7 +134,7 @@ def load_pe(codes: list[str], trading_days: pd.DatetimeIndex, progress=None) -> 
     return out.astype(float)
 
 
-def load_eps(codes: list[str], first_year: int, today: date, progress=None) -> pd.DataFrame:
+def load_eps(codes: list[str], first_year: int, today: date, progress=None, markets=('sii',)) -> pd.DataFrame:
     cum = {}
     for y in range(first_year, today.year + 1):
         for q in range(1, 5):
@@ -138,11 +143,15 @@ def load_eps(codes: list[str], first_year: int, today: date, progress=None) -> p
                 continue
             if progress:
                 progress(f'財報 {p}')
-            try:
-                df = rs.quarterly_income(y, q, today=today)
+            parts = []
+            for mk in markets:
+                try:
+                    parts.append(rs.quarterly_income(y, q, today=today, market=mk))
+                except rs.NoData:
+                    pass
+            if parts:
+                df = pd.concat(parts).drop_duplicates('code')
                 cum[p] = df[df['code'].isin(codes)].set_index('code')['eps']
-            except rs.NoData:
-                pass
     cum_df = pd.DataFrame(cum).T.reindex(columns=codes).astype(float)
     cum_df.index = pd.PeriodIndex(cum_df.index, freq='Q')
     single = cum_df.copy()

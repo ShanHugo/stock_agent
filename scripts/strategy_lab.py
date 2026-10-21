@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""規則驗證：在 0050 + 00881 成分股（上市部分）上，逐年前進驗證三類選股規則，與買進持有 0050 比較。
+"""規則驗證：在選定的選股範圍上，逐年前進驗證三類選股規則，與買進持有 0050 比較。
 
 使用範例:
   python scripts/strategy_lab.py                       # 三類規則全部驗證
   python scripts/strategy_lab.py --families trend_following
+  python scripts/strategy_lab.py --universe tw-electronics   # 上市電子 8 類當時的公司
 報告輸出：reports/strategy_lab_YYYYMMDD.md
 第一次執行需回補約 10 年資料（有快取，之後很快）。
 """
@@ -24,6 +25,7 @@ from src.app.lab.engine import FEE, TAX, SLIPPAGE
 from src.app.lab.rules import GRID, NAMES
 from src.app.lab.walkforward import evaluate_family, MDD_TOLERANCE
 from src.app.lab.constituents import scan_changes, membership_history, members_on
+from src.app.lab.market import UNIVERSES, build_market_dataset, describe
 
 ETFS = ['0050', '00881']
 DATA_START = '2015-01-01'
@@ -47,9 +49,11 @@ def _beats_ew(r):
     return r.oos['cagr'] > r.equal_weight['cagr'] and r.oos['sharpe'] > r.equal_weight['sharpe']
 
 
-def render(results, ds, today, *, mode, universe, codes, changes=None, no_price=None) -> str:
+def render(results, ds, today, *, mode, universe, codes, changes=None, no_price=None, scope=None) -> str:
     pit = mode == 'tw50-pit'
-    L = [f"# 選股規則驗證報告（{today}，{'臺灣50時點成分股' if pit else '目前成分股'}）", '', '## 結論', '']
+    elec = mode in UNIVERSES
+    title = '臺灣50時點成分股' if pit else (f'{scope[0]}時點名單' if elec else '目前成分股')
+    L = [f"# 選股規則驗證報告（{today}，{title}）", '', '## 結論', '']
     for r in results:
         verdict = '✅ 通過' if r.passed else '❌ 未通過'
         L.append(f"- **{NAMES[r.family]}**：{verdict}（對 0050）"
@@ -73,13 +77,16 @@ def render(results, ds, today, *, mode, universe, codes, changes=None, no_price=
               f"期間曾入選者共 {len(codes)} 檔",
               f"- 被剔除後下市、Yahoo Finance 已無價格的股票（無價格期間無法被選入）：{'、'.join(no_price) if no_price else '無'}",
               '- 未納入 00881 的歷史成分股（追蹤的指數不同，需另外重建）']
+    elif elec:
+        L += [f'- 選股範圍：{scope[1]}']
     else:
         L += [f"- 選股範圍：0050 與 00881 目前成分股中的上市公司，共 {len(codes)} 檔"
               f"（排除上櫃：{'、'.join(universe['unmatched']) or '無'}）。**有倖存者偏差**"]
     L += [f'- 期間：{TRADE_START} 起交易，樣本外 {OOS_YEARS[0]} 年至今；每年只用之前的資料挑參數',
           '- 每月最後一個交易日收盤依訊號調整，選中的股票等權重，沒選中的部分持有現金（報酬以 0 計）',
           f'- 成本：手續費買賣各 {FEE:.4%}、證交稅賣出 {TAX:.1%}、滑價買賣各 {SLIPPAGE:.2%}（未計券商折扣，偏保守）',
-          '- 價格使用還原權值（含配息），基準 0050 同樣用還原價',
+          '- 價格使用還原權值（含配息），基準 0050 同樣用還原價'
+          + ('（自行由證交所／櫃買每日收盤價與除權息、減資紀錄還原）' if elec else ''),
           '- 月營收於次月 11 日起才使用；季報依法定期限（Q1 5/16、Q2 8/15、Q3 11/15、年報次年 4/1）起才使用']
     L += [f'- 資料備註：{n}' for n in ds.notes]
 
@@ -98,6 +105,9 @@ def render(results, ds, today, *, mode, universe, codes, changes=None, no_price=
     L += ['', '## 這份報告的限制', '']
     if pit:
         L.append('- 已用時點成分股消除主要的倖存者偏差；但下市股票若無價格資料，仍有少量殘留偏差。')
+    elif elec:
+        L.append('- 已納入期間內下市的公司；但它們沒有月營收與財報資料，營收、估值類規則選不到它們'
+                 '（等權重持有則會持有），這部分仍可能讓營收、估值類規則略為偏樂觀。')
     else:
         L.append('- **倖存者偏差**：用的是現在的成分股，回測期間被剔除的公司不在名單內，結果偏樂觀。')
     L += [f"- **多重測試**：共比較 {sum(len(GRID[r.family]) for r in results)} 組參數；比越多組，越容易碰巧出現好看的結果。",
@@ -114,17 +124,26 @@ def render(results, ds, today, *, mode, universe, codes, changes=None, no_price=
 def main() -> int:
     p = argparse.ArgumentParser(description='選股規則驗證')
     p.add_argument('--families', nargs='+', default=list(GRID), choices=list(GRID))
-    p.add_argument('--universe', default='tw50-pit', choices=['tw50-pit', 'current'],
-                   help='tw50-pit = 臺灣50當時的成分股（無倖存者偏差）；current = 0050+00881 目前成分股')
+    p.add_argument('--universe', default='tw50-pit', choices=['tw50-pit', *UNIVERSES, 'current'],
+                   help='tw50-pit = 臺灣50當時的成分股（無倖存者偏差）；electronics = 上市＋上櫃電子 8 類當時的公司'
+                        '（含下市）；electronics-twse / electronics-tpex = 只看上市 / 上櫃；current = 0050+00881 目前成分股')
     args = p.parse_args()
     today = date.today()
-    universe = fetch_universe(ETFS)
-    changes, universe_fn = None, None
-    if args.universe == 'tw50-pit':
+    log = lambda m: print(m if m.startswith('[') else f'[data] {m}', file=sys.stderr)
+    changes, universe_fn, universe, scope, ds = None, None, None, None, None
+    if args.universe in UNIVERSES:
+        built = build_market_dataset(UNIVERSES[args.universe], start=DATA_START, chips_start=None, today=today, log=log)
+        ds, codes, history = built['ds'], built['codes'], built['history']
+        universe_fn = lambda d: members_on(history, d)
+        scope = describe(UNIVERSES[args.universe], built)
+    elif args.universe == 'tw50-pit':
+        universe = fetch_universe(ETFS)
         codes, universe_fn, changes = pit_universe(set(universe['etfs']['0050']['codes']))
     else:
+        universe = fetch_universe(ETFS)
         codes = sorted(universe['codes'])
-    ds = build_dataset(codes, start=DATA_START, today=today, progress=lambda m: print(f'[data] {m}', file=sys.stderr))
+    if ds is None:
+        ds = build_dataset(codes, start=DATA_START, today=today, progress=log)
     no_price = [c for c in codes if c not in ds.prices.columns or ds.prices[c].dropna().empty]
     end = ds.prices.index[-1]
     results = []
@@ -133,7 +152,7 @@ def main() -> int:
         results.append(evaluate_family(ds, codes, fam, start=TRADE_START, oos_years=OOS_YEARS, end=end,
                                        universe_fn=universe_fn))
     report = render(results, ds, today, mode=args.universe, universe=universe, codes=codes,
-                    changes=changes, no_price=no_price)
+                    changes=changes, no_price=no_price, scope=scope)
     out = _ROOT / 'reports' / f'strategy_lab_{today:%Y%m%d}_{args.universe}.md'
     out.parent.mkdir(exist_ok=True)
     out.write_text(report, encoding='utf-8')

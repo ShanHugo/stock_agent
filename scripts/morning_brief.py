@@ -23,6 +23,7 @@ from src.app.alerts import load_portfolio
 from src.app.alerts.narrate import OllamaNarrator
 from src.app.alerts.notify import send_discord
 from src.app.briefing.compose import build_briefing, format_briefing, has_triggered
+from src.app.briefing import sector_news
 
 
 def main() -> int:
@@ -41,10 +42,15 @@ def main() -> int:
     portfolio = load_portfolio(args.portfolio)
     b = build_briefing(portfolio, now=now, price_fetcher=fetch_ohlcv_yf, default_tw_fee_bps=settings.tx_fee_bps,
                        include_news=not args.no_news)
+    narrator = None if args.no_narrate else OllamaNarrator(
+        model=os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'), url=os.getenv('OLLAMA_URL', 'http://localhost:11434'))
+    if narrator:
+        warnings: list[str] = []
+        sector_news.add_summaries(b.get('sector_news'), narrator.chat, warnings)
+        for w in warnings:
+            print(f'[warn] 族群新聞 {w}')
     text = format_briefing(b)
-    if not args.no_narrate:
-        narrator = OllamaNarrator(model=os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'),
-                                  url=os.getenv('OLLAMA_URL', 'http://localhost:11434'))
+    if narrator:
         narration, err = narrator.summarize(text, has_triggered=has_triggered(b))
         if err:
             print(f'[warn] {err}')

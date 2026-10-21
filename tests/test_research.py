@@ -100,7 +100,7 @@ class TestFormat(unittest.TestCase):
 
 
 class TestSourcesParsing(unittest.TestCase):
-    HTML = """<table><tr><th>公司代號</th><th>公司名稱</th><th>當月營收</th><th>上月營收</th><th>去年當月營收</th>
+    HTML = """<table><tr><th class=tt align=left >產業別：半導體業</th></tr></table><table><tr><th>公司代號</th><th>公司名稱</th><th>當月營收</th><th>上月營收</th><th>去年當月營收</th>
     <th>上月比較增減(%)</th><th>去年同月增減(%)</th><th>當月累計營收</th><th>去年累計營收</th><th>前期比較增減(%)</th><th>備註</th></tr>
     <tr><td>2330</td><td>台積電</td><td>511,857,399</td><td>514,805,337</td><td>330,980,920</td><td>-0.57</td>
     <td>54.64</td><td>3,898,726,974</td><td>2,762,963,851</td><td>41.10</td><td>因先進製程需求增加</td></tr>
@@ -114,7 +114,31 @@ class TestSourcesParsing(unittest.TestCase):
             self.assertEqual(df.iloc[0]['note'], '因先進製程需求增加')
             self.assertEqual(len(df), 1)  # 合計列被排除
             sources.monthly_revenue(2026, 9, today=date(2026, 12, 20))
-            self.assertEqual(g.call_count, 1)  # 第二次讀快取
+            self.assertEqual(g.call_count, 2)  # 本國＋外國企業兩頁；第二次讀快取
+            self.assertEqual(df.iloc[0]['industry'], '半導體業')
+
+    def test_revenue_industry_sections(self):
+        second = self.HTML.replace('半導體業', '光電業').replace('2330', '3008').replace('台積電', '大立光')
+        df = sources.parse_revenue_html(self.HTML + second)
+        self.assertEqual(dict(zip(df['code'], df['industry'])), {'2330': '半導體業', '3008': '光電業'})
+
+    def test_legacy_revenue_cache_without_industry_is_refetched(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(sources, 'CACHE', Path(d)), \
+                mock.patch.object(sources, '_get', return_value=mock.Mock(text=self.HTML)) as g:
+            path = Path(d) / 'revenue' / '202609.json'
+            path.parent.mkdir(parents=True)
+            path.write_text(pd.DataFrame([{'code': '2330', 'yoy_pct': 1.0}]).to_json(orient='split'), encoding='utf-8')
+            df = sources.monthly_revenue(2026, 9, today=date(2026, 12, 20))
+            self.assertEqual(g.call_count, 2)
+            self.assertEqual(df.iloc[0]['industry'], '半導體業')
+
+    def test_foreign_issuers_merged(self):
+        ky = self.HTML.replace('2330', '4958').replace('台積電', '臻鼎-KY')
+        fake = lambda url, **k: mock.Mock(text=ky if url.endswith('_1.html') else self.HTML)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(sources, 'CACHE', Path(d)), \
+                mock.patch.object(sources, '_get', side_effect=fake):
+            df = sources.monthly_revenue(2026, 9, today=date(2026, 12, 20))
+        self.assertEqual(sorted(df['code']), ['2330', '4958'])
 
     def test_unpublished_month_not_cached(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(sources, 'CACHE', Path(d)), \

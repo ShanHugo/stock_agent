@@ -6,8 +6,14 @@ from ..alerts.portfolio import Portfolio
 from ..alerts.runner import run_alerts
 from ..alerts.rules import TRIGGERED, NEAR_STOP, NEAR_TARGET
 from ..alerts.notify import TITLES
+import json
+from pathlib import Path
+
+import requests
+
 from . import sources as src
 from . import news as news_mod
+from . import sector_news
 
 WEEKDAYS = '一二三四五六日'
 LOOKAHEAD_DAYS = 7       # 美國行事曆往後看幾天
@@ -19,7 +25,8 @@ LIMITATIONS = ['CPI、非農就業等 BLS 發布日無法自動取得（BLS 封�
 def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, default_tw_fee_bps: float,
                    fetch_taifex=src.fetch_taifex, fetch_html=src.fetch_html,
                    fetch_twse=src.fetch_twse_openapi, fetch_feed=news_mod.fetch_feed,
-                   include_news: bool = True) -> dict:
+                   fetch_cnyes=requests.get, include_news: bool = True,
+                   radar_path: Path | None = Path('state/radar/latest.json')) -> dict:
     today = now.date()
     errors: list[str] = []
     b = {'date': today, 'errors': errors, 'limitations': list(LIMITATIONS)}
@@ -68,6 +75,11 @@ def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, defaul
         errors.append(f'重大訊息: {e}')
 
     b['news'] = news_mod.collect_news(portfolio, now, errors, fetch=fetch_feed) if include_news else None
+    b['radar'] = load_radar(radar_path, today)
+    b['sector_news'] = None
+    if include_news:
+        from ..lab.themes import load_code_themes
+        b['sector_news'] = sector_news.collect(now, load_code_themes(), errors, get=fetch_cnyes)
 
     # 依你自己的規則：沿用每日檢查的判斷，但不寫入 state（不影響 14:30 的檢查）
     res = run_alerts(portfolio, price_fetcher, today=today, default_tw_fee_bps=default_tw_fee_bps,
@@ -79,6 +91,43 @@ def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, defaul
     b['risk'] = res['risk'] if res.get('risk') and (res['risk']['total_risk_exceeded'] or res['risk']['oversized']) else None
     errors.extend(e for e in res['errors'] if e not in errors)
     return b
+
+
+RADAR_SHOW = 5
+RADAR_MAX_AGE_DAYS = 5
+
+
+def load_radar(path: Path | None, today: date) -> dict | None:
+    """前一個交易日收盤後算好的族群雷達（scripts/sector_radar.py）；太舊或不存在就不列。"""
+    if not path or not path.exists():
+        return None
+    try:
+        r = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    if (today - date.fromisoformat(r['date'])).days > RADAR_MAX_AGE_DAYS or not r.get('rows'):
+        return None
+    return r
+
+
+def format_radar(r: dict | None) -> list[str]:
+    if not r:
+        return []
+    d = r['date']
+    lines = ['', f"**族群雷達（{d[5:7]}/{d[8:]} 收盤；依營收年增、近 60 日漲跌、量能、融資增減排序）**"]
+    for row in r['rows'][:RADAR_SHOW]:
+        lines.append(f"- {row['rank']}. {row['theme']}（{int(row['members'])} 檔）：營收年增中位數 {row['rev_yoy']:+.1f}%、"
+                     f"連 2 月年增 {row['rev_breadth']:.0%}、近 60 日 {_p(row['r60'], 1)}、站上 120 日線 {row['above_ma']:.0%}")
+    last = r['rows'][-1]
+    lines.append(f"- 排名最後：{last['theme']}（營收年增中位數 {last['rev_yoy']:+.1f}%、近 60 日 {_p(last['r60'], 1)}）")
+    bt = (r.get('backtest') or {}).get('20')
+    if bt:
+        lines.append(f"_歷史驗證（{bt['periods']} 期）：前 3 名族群每 20 天平均比 0050 {_p(bt['top_vs_bench'])}"
+                     f"（t 值 {bt['top_vs_bench_t']:+.1f}，贏的期數 {bt['top_beats_bench']:.0%}）；"
+                     f"比後 3 名 {_p(bt['top_vs_bottom'])}。排名是資料整理，不是買賣建議。_")
+    else:
+        lines.append('_排名是資料整理，尚未完成歷史驗證，不是買賣建議。_')
+    return lines
 
 
 def _p(v, digits=2):
@@ -140,6 +189,8 @@ def format_briefing(b: dict, narration: str | None = None) -> str:
     for a in b.get('announcements', []):
         lines.append(f"- 重大訊息 {a['code']} {a['name']}：{a['subject']}")
 
+    lines += format_radar(b.get('radar'))
+    lines += sector_news.format_section(b.get('sector_news'), src.TPE)
     if b.get('news'):
         lines += news_mod.format_news(b['news'], src.TPE)
 

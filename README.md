@@ -20,7 +20,7 @@ git clone https://github.com/ShanHugo/stock_agent.git
 cd stock_agent
 git switch feat/agent-pipeline
 py -3.12 -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt pytest
+.venv\Scripts\python.exe -m pip install -r requirements.txt pytest httpx
 .venv\Scripts\python.exe -m pytest -q
 ```
 1. 把 `.env`、`portfolio.json`（以及選用的 `state/`、`data/raw/`）複製到專案根目錄
@@ -40,6 +40,19 @@ pip install -r requirements.txt
 - 複製 `.env.example` 為 `.env`，填入 `DISCORD_WEBHOOK_URL`（Discord 頻道 → 整合 → Webhook）
 - 複製 `portfolio.example.json` 為 `portfolio.json`，填入持股與提醒規則
 - 選用：安裝 [Ollama](https://ollama.com) 並下載 `OLLAMA_MODEL`（預設 `qwen3.5:9b`）以產生一句摘要
+
+### 本機操作台（網頁）
+雙擊 `scripts\start_console.cmd`（或執行 `.venv\Scripts\python.exe -m src.web.console --open`），瀏覽器會開啟 http://127.0.0.1:8765 。
+關掉那個黑色視窗就停止。只聽本機 127.0.0.1，同網路的其他裝置連不進來。
+
+- **持股總覽**：最新收盤、未實現損益、台幣市值、停損與停利價、狀態（只看狀態，不推送、不影響每日提醒紀錄）
+- **簡報與提醒**：盤前簡報、持股提醒的預覽或推送到 Discord
+- **交易與計畫**：記錄買賣、建立個股交易計畫並算可買股數、確認持股理由、交易檢討
+- **研究卡**：產生個股研究卡、管理觀察清單
+- **選股研究**：下載進度條、閱讀報告、重新執行研究
+- **設定與排程**：排程狀態與最近輸出、直接編輯 `portfolio.json`（儲存前檢查格式，舊版自動備份到 `state\portfolio_backups\`）
+
+每個按鈕都是呼叫下面同一支命令列程式，結果完全相同；推送、記錄交易等會改變資料的動作會先跳出確認。
 
 ### 3. 執行每日例行流程
 ```bash
@@ -114,7 +127,44 @@ python scripts/research_card.py 2330 --send     # 推送到 Discord
 - 季度數字由累計財報相減得出單季；金融、保險業格式不同，第一版不支援。上櫃公司尚未支援。
 - 每日檢查會在觀察清單與持有個股公布新月營收時通知（第一次執行只記錄，不通知）。
 
-### 7. 測試
+### 7. 選股類型研究（歷史驗證）
+用歷史資料檢驗「哪一類股票之後比較會漲」，以及幾種選股規則扣除成本後是否勝過直接持有：
+```bash
+python scripts/shortterm_lab.py --universe electronics   # 短期預測 + 單一特徵分組
+python scripts/strategy_lab.py  --universe electronics   # 趨勢、營收動能、價值成長三類規則
+```
+- 選股範圍：`electronics` = 上市＋上櫃電子 8 類（半導體、電腦及週邊、光電、通信網路、電子零組件、電子通路、資訊服務、其他電子），
+  每月依證交所／櫃買中心**當時**的產業分類重建名單，**含之後下市的公司**；`electronics-twse`、`electronics-tpex` 只看上市或上櫃；
+  `tw50-pit`（預設）= 臺灣50當時的成分股。
+- 電子股範圍的價格不用 Yahoo（沒有下市股票），改由證交所／櫃買每日收盤價自行還原除權息與減資；報告附上與 Yahoo 還原價的比對。
+- 已下市公司在公開資訊觀測站查不到月營收與財報，這兩項特徵對它們是缺值（報告會列出檔數）。
+- 單一特徵分組：每 20 個交易日把範圍內股票依營收年增、法人買超、近期漲幅、本益比位置等分 5 組，看各組之後 20 日相對表現。
+- 報告輸出到 `reports/`。第一次執行需回補 2015 年起的逐日資料（上市、上櫃各一條連線同時抓，約 7～8 小時），
+  之後讀 `data/raw/` 快取。
+- 只陳述歷史統計；過去有效不代表未來有效，非投資建議。
+
+**族群雷達**（記憶體、面板、IC 設計…哪些族群目前營收、動能、量能比較強）：
+```bash
+python scripts/sector_radar.py              # 最新一個交易日的族群排名（排程：平日 16:45）
+python scripts/sector_radar.py --backtest   # 歷史驗證：每 20 / 60 天持有排名前 3 族群 vs 0050
+```
+- 族群分類來自櫃買中心產業價值鏈平台（每家公司快取 90 天），定義在 `src/app/lab/themes.py`。
+- 排序：營收年增、近 60 日漲跌、量能比、融資 20 日變化，四項族群中位數的跨族群排名平均（這四項在電子股單一特徵分組中有穩定規律）。
+- 盤前簡報會列出前 5 名與最後 1 名，並附歷史驗證結果；操作台「選股研究」分頁有完整表格。
+
+**族群新聞**：盤前簡報會抓鉅亨網過去 18 小時的台股新聞與頭條，依族群歸類，並由本機模型為新聞最多的 6 個族群各寫 1–2 句整理。
+整理中出現新聞沒有的數字、或出現「建議、買進、布局」等字眼時整段捨棄，只列標題與連結。
+
+**前瞻測試**（用真實的未來資料驗證回測結果）：
+```bash
+python scripts/forward_test.py            # 記錄今天的名單並評估之前的紀錄（排程：平日 16:30）
+python scripts/forward_test.py --dry-run  # 只顯示
+```
+- 規則固定為「營收動能、營收年增最高 20 檔」（上市＋上櫃電子股、最近 2 個已公布月份營收年增都 > 0、站上 120 日線），規則代號 `rev_momentum_top20_v1`。
+- 紀錄存在 `state/forward/records.jsonl`，只新增、不修改；每筆在 5 天、20 天後自動以真實股價扣成本、與同期 0050 比較。
+- 操作台「選股研究」分頁可看最新名單與累積結果。這是驗證規則用的紀錄，不是買賣建議。
+
+### 8. 測試
 - 以 `sample_data.csv` 驗證端到端流程
 
 ---

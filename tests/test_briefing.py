@@ -136,6 +136,53 @@ class TestNews(unittest.TestCase):
         self.assertNotIn('', chunks)
 
 
+def cnyes_item(i, title, ts, keywords=(), stocks=(), content='&lt;p&gt;內文&lt;/p&gt;'):
+    return {'newsId': i, 'title': title, 'publishAt': ts, 'keyword': list(keywords), 'stock': list(stocks),
+            'content': content}
+
+
+def fake_cnyes(url, params=None, **kw):
+    from unittest import mock
+    t = int(datetime(2026, 10, 23, 7, 0, tzinfo=TPE).timestamp())
+    data = [] if params['page'] > 1 else [
+        cnyes_item(1, 'DRAM 合約價第四季再漲 15%', t, ['記憶體']),
+        cnyes_item(2, '南亞科法說：HBM 需求強', t - 60, ['南亞科'], ['2408']),
+        cnyes_item(3, '面板報價持平', t - 120, ['面板']),
+        cnyes_item(5, '盤中速報 - 櫃買指數上漲，記憶體領漲', t - 30, ['記憶體']),      # 盤勢速報不列入族群
+        cnyes_item(4, '很久以前的記憶體新聞', t - 86400 * 3, ['記憶體']),
+    ]
+    return mock.Mock(json=lambda: {'items': {'data': data}}, raise_for_status=lambda: None)
+
+
+class TestSectorNews(unittest.TestCase):
+    def test_collect_group_and_format(self):
+        from src.app.briefing import sector_news as sn
+        errs = []
+        res = sn.collect(datetime(2026, 10, 23, 8, 30, tzinfo=TPE), {'2408': {'記憶體'}}, errs, get=fake_cnyes)
+        self.assertEqual(res['total'], 4)                                  # 舊聞被濾掉
+        self.assertEqual([g['theme'] for g in res['groups']], ['記憶體'])   # 面板只有 1 則，不列
+        sn.add_summaries(res, lambda p: '記憶體合約價第四季再漲 15%，HBM 需求強。', errs)
+        txt = '\n'.join(sn.format_section(res, TPE))
+        self.assertIn('**記憶體**（2 則）：記憶體合約價', txt)
+        self.assertIn('](<https://news.cnyes.com/news/id/1>)', txt)
+
+    def test_summary_guards(self):
+        from src.app.briefing import sector_news as sn
+        g = {'theme': '記憶體', 'items': [{'title': 'DRAM 再漲 15%', 'excerpt': ''}]}
+        self.assertEqual(sn.summarize_theme(g, lambda p: 'DRAM 再漲 15%。')[0], 'DRAM 再漲 15%。')
+        self.assertIsNone(sn.summarize_theme(g, lambda p: 'DRAM 再漲 30%。')[0])      # 編造數字
+        self.assertIsNone(sn.summarize_theme(g, lambda p: '建議逢低布局記憶體股。')[0])  # 買賣建議
+
+    def test_theme_matching(self):
+        from src.app.lab.themes import news_themes, themes_for
+        self.assertEqual(news_themes('OLED 面板新品', [], [], {}), {'面板'})              # OLED 不算 LED
+        self.assertEqual(news_themes('法說會', [], ['2408'], {'2408': {'記憶體'}}), {'記憶體'})
+        self.assertEqual(news_themes('盤後總整理', [], [str(i) for i in range(6)], {'0': {'記憶體'}}), set())
+        self.assertIn('記憶體', themes_for([('半導體', '記憶體IC'), ('半導體', 'DRAM製造')]))
+        self.assertNotIn('IC設計', themes_for([('半導體', '記憶體IC')]))
+        self.assertEqual(themes_for([('平面顯示器', '面板')]), {'面板'})
+
+
 class TestCompose(unittest.TestCase):
     def build(self, holdings, **kw):
         pf = Portfolio(holdings=holdings)
@@ -145,7 +192,7 @@ class TestCompose(unittest.TestCase):
             fetch_html=lambda url: FOMC_HTML if 'federalreserve' in url else BEA_HTML,
             fetch_twse=lambda path: ([{'Date': '1151023', 'Code': '0050', 'Name': '元大台灣50', 'Exdividend': '息',
                                        'CashDividend': '1.0'}] if 'TWT48U' in path else []),
-            fetch_feed=fake_feed, **kw)
+            fetch_feed=fake_feed, fetch_cnyes=fake_cnyes, radar_path=None, **kw)
 
     def test_full_briefing(self):
         b = self.build([Holding(symbol='0050', name='元大台灣50', shares=100, cost=95, stop_price=99.5)])
@@ -159,6 +206,7 @@ class TestCompose(unittest.TestCase):
         self.assertIn('接近停損', txt)                 # 100 距 99.5 在 2% 內
         self.assertIn('非投資建議', txt)
         self.assertIn('[0050 規模創新高](<https://tw.example/1>)', txt)
+        self.assertIn('**記憶體**（', txt)                # 族群新聞（未經模型整理時只列標題）
         self.assertFalse(has_triggered(b))
 
     def test_source_failures_are_reported_not_fatal(self):
@@ -168,10 +216,47 @@ class TestCompose(unittest.TestCase):
             raise ConnectionError('down')
         b = build_briefing(pf, now=datetime(2026, 10, 21, 8, 30, tzinfo=TPE), price_fetcher=prices,
                            default_tw_fee_bps=1, fetch_taifex=boom, fetch_html=boom, fetch_twse=boom,
-                           fetch_feed=boom)
+                           fetch_feed=boom, fetch_cnyes=boom, radar_path=None)
         txt = format_briefing(b)
         self.assertIn('抓取失敗', txt)
+        self.assertIn('鉅亨網新聞', txt)
         self.assertIn('沒有接近或觸發你設定的任何規則', txt)
+
+
+class TestRadarSection(unittest.TestCase):
+    def test_load_and_format(self):
+        import json
+        import tempfile
+        from datetime import date
+        from pathlib import Path
+        from src.app.briefing.compose import load_radar, format_radar
+        row = lambda i, t: {'theme': t, 'rank': i, 'members': 20, 'rev_yoy': 30.5 - i, 'rev_breadth': 0.6, 'r60': 0.12,
+                            'above_ma': 0.7, 'score': 1 - i / 10}
+        data = {'date': '2026-10-20', 'rows': [row(1, '記憶體'), row(2, '面板'), row(3, 'IC設計')],
+                'backtest': {'20': {'periods': 100, 'top_vs_bench': 0.004, 'top_vs_bench_t': 0.8, 'top_beats_bench': 0.48,
+                                    'top_vs_bottom': 0.012}}}
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'latest.json'
+            p.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+            self.assertIsNone(load_radar(p, date(2026, 11, 30)))          # 太舊不列
+            txt = '\n'.join(format_radar(load_radar(p, date(2026, 10, 21))))
+        self.assertIn('1. 記憶體（20 檔）：營收年增中位數 +29.5%', txt)
+        self.assertIn('排名最後：IC設計', txt)
+        self.assertIn('t 值 +0.8', txt)
+        self.assertIn('不是買賣建議', txt)
+
+
+class TestNewsWindow(unittest.TestCase):
+    def test_since_previous_trading_day(self):
+        from src.app.briefing.news import news_since
+        weekend = lambda d: d.weekday() >= 5
+        wed = news_since(datetime(2026, 10, 21, 8, 30, tzinfo=TPE), weekend)
+        self.assertEqual(wed, datetime(2026, 10, 20, 14, 30, tzinfo=TPE))
+        mon = news_since(datetime(2026, 10, 26, 8, 30, tzinfo=TPE), weekend)
+        self.assertEqual(mon, datetime(2026, 10, 23, 14, 30, tzinfo=TPE))           # 週一 → 週五收盤後
+        lny = {datetime(2027, 2, d).date() for d in range(4, 13)}                    # 假設的春節連假 2/4～2/12
+        after = news_since(datetime(2027, 2, 15, 8, 30, tzinfo=TPE), lambda d: d.weekday() >= 5 or d in lny)
+        self.assertEqual(after, datetime(2027, 2, 3, 14, 30, tzinfo=TPE))
 
 
 if __name__ == '__main__':
