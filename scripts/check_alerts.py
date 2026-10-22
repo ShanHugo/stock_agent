@@ -18,7 +18,7 @@ if str(_ROOT) not in sys.path:
 os.chdir(_ROOT)  # 排程執行時工作目錄可能不同；快取與 state 以專案根目錄為準
 
 from src.app.config.settings import settings
-from src.app.data.fetch import fetch_ohlcv_yf
+from src.app.data.fetch import fetch_ohlcv_tw
 from src.app.alerts import load_portfolio, run_alerts
 from src.app.alerts.narrate import OllamaNarrator
 from src.app.alerts.notify import send_discord, format_status
@@ -42,7 +42,7 @@ def main() -> int:
         model=os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'), url=os.getenv('OLLAMA_URL', 'http://localhost:11434'))
 
     now = datetime.now(ZoneInfo('Asia/Taipei'))
-    res = run_alerts(portfolio, fetch_ohlcv_yf, today=now.date(), now=now,
+    res = run_alerts(portfolio, fetch_ohlcv_tw, today=now.date(), now=now,
                      default_tw_fee_bps=settings.tx_fee_bps,
                      state_path=_ROOT / 'state' / 'alerts_state.json',
                      narrator=narrator, force=args.force,

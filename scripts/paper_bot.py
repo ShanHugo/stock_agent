@@ -346,7 +346,7 @@ def write_view(bot, cfg, s, start, bench, nm, now) -> None:
         'capital': cfg.capital, 'cash': round(bot.cash, 2), 'summary': s, 'curve': curve,
         'config': {'max_risk_per_trade': cfg.max_risk_per_trade, 'max_position_pct': cfg.max_position_pct,
                    'max_total_risk': cfg.max_total_risk, 'stop_pct': cfg.stop_pct, 'fee_discount': FEE_DISCOUNT,
-                   'breakeven_after': cfg.breakeven_after, 'take_profit_pct': cfg.take_profit_pct,
+                   'breakeven_after': cfg.breakeven_after,
                    'max_per_theme': cfg.max_per_theme,
                    'min_fee': MIN_FEE},
         'positions': [named({'code': c, **p}) for c, p in bot.positions.items()],
@@ -383,7 +383,7 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
         bot = Bot.new(cfg)
         days = px.index[-1:]                       # 新帳戶：從最新一個交易日收盤後開始排單
     start_date = saved['start'] if saved else days[0].strftime('%Y-%m-%d')
-    executed, new_orders = [], []
+    executed = []
     for d in days:
         ds_ = d.strftime('%Y-%m-%d')
         opens, closes = raw_quote(d, 'open'), raw_quote(d, 'close')
@@ -398,7 +398,7 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
         members = [c for c in members_on(hist, d) if c in codes]
         # 停損、排單股數用當天原始收盤（與用原始開盤價設的停損一致）；均線用還原價
         raw = closes.reindex(codes).to_frame().T.set_axis([d])
-        new_orders = bot.decide(ds_, make_context(d, raw, ma, latest, pos2, neg2, members))
+        bot.decide(ds_, make_context(d, raw, ma, latest, pos2, neg2, members))
     data = bot.to_dict()
     data['start'] = start_date
     data['updated'] = now.isoformat(timespec='seconds')

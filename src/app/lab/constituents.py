@@ -3,7 +3,6 @@
 來源：https://taiwanindex.com.tw/news/{id}（伺服器端產生的頁面，逐篇讀取，有快取）
 """
 from __future__ import annotations
-import json
 import re
 import time
 from datetime import date
@@ -110,8 +109,3 @@ def members_on(history: list[tuple[pd.Timestamp, set[str]]], d: pd.Timestamp) ->
         else:
             break
     return current
-
-
-def save_changes(changes: list[dict], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(changes, ensure_ascii=False, indent=2), encoding='utf-8')

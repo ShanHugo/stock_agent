@@ -147,16 +147,3 @@ def load_code_themes() -> dict[str, set[str]]:
         if t:
             out[path.stem] = t
     return out
-
-
-def all_chains(codes: list[str], log=print) -> dict[str, list[tuple[str, str]]]:
-    out = {}
-    for i, c in enumerate(codes):
-        try:
-            out[c] = company_chain(c)
-        except Exception as e:      # noqa: BLE001 — 單一公司失敗不影響其他
-            log(f'[ic] {c} 失敗：{e}')
-            out[c] = []
-        if i % 50 == 0:
-            log(f'[ic] 產業鏈 {c} ({i + 1}/{len(codes)})')
-    return out

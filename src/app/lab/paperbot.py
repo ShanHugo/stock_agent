@@ -32,9 +32,6 @@ class Config:
     slippage: float = 0.0          # 每日模擬用真實開盤價，不另加；歷史模擬建議 0.001
     ma_days: int = 120
     rev_months: int = 2
-    take_profit_pct: float | None = None      # 收盤 ≥ 成本 ×(1+此值) → 隔天停利；None＝不停利
-    take_profit_fraction: float = 1.0         # 停利賣出比例（0.5＝先賣一半，剩下照原本規則；每檔只停利一次）
-    rebuy_cooldown_days: int = 0              # 全部停利後，同一檔幾天內不再買（0＝仍符合條件就可以買回）
     breakeven_after: float | None = None      # 收盤 ≥ 成本 ×(1+此值) 後，停損上移到成本價
     max_per_theme: int | None = None          # 同一族群最多同時持有幾檔（一檔屬於多個族群時，任一族群滿了就不買）
 
@@ -57,7 +54,6 @@ class Bot:
     trades: list = field(default_factory=list)
     equity: list = field(default_factory=list)      # [{date, equity, cash, positions}]
     last_date: str | None = None
-    cooldown: dict = field(default_factory=dict)    # code → 這天（含）以前不再買進（停利後換股用）
 
     @classmethod
     def new(cls, cfg: Config) -> 'Bot':
@@ -66,12 +62,15 @@ class Bot:
     # ---------- 狀態存取 ----------
     def to_dict(self) -> dict:
         return {'cfg': asdict(self.cfg), 'cash': self.cash, 'positions': self.positions, 'pending': self.pending,
-                'trades': self.trades, 'equity': self.equity, 'last_date': self.last_date, 'cooldown': self.cooldown}
+                'trades': self.trades, 'equity': self.equity, 'last_date': self.last_date}
 
     @classmethod
     def from_dict(cls, d: dict) -> 'Bot':
-        return cls(cfg=Config(**d['cfg']), cash=d['cash'], positions=d['positions'], pending=d['pending'],
-                   trades=d['trades'], equity=d['equity'], last_date=d['last_date'], cooldown=d.get('cooldown', {}))
+        known = set(Config.__dataclass_fields__)          # 略過已移除的舊設定，舊存檔照樣讀得進來
+        return cls(cfg=Config(**{k: v for k, v in d['cfg'].items() if k in known}), cash=d['cash'],
+                   positions=d['positions'], pending=d['pending'], trades=d['trades'], equity=d['equity'],
+                   last_date=d['last_date'])
+
 
     # ---------- 每日步驟 ----------
     def execute(self, d: str, exec_price) -> list[dict]:
@@ -87,28 +86,17 @@ class Bot:
                 if o['code'] not in self.positions:
                     continue                  # 已經賣掉了（保險：避免重複賣單）
                 p *= 1 - self.cfg.slippage
-                pos = self.positions[o['code']]
-                qty = min(o['shares'], pos['shares'])
-                partial = qty < pos['shares']
+                pos = self.positions.pop(o['code'])       # 出場一律全部賣出
+                qty = pos['shares']
                 amt = qty * p
                 cost = fee(self.cfg, amt) + sell_tax(self.cfg, o['code'], amt)
-                basis = pos['cost'] * qty / pos['shares']
                 self.cash += amt - cost
-                pnl = amt - cost - basis
+                pnl = amt - cost - pos['cost']
                 init_stop = pos.get('init_stop', pos['stop'])
                 t = {'date': d, 'side': 'sell', 'code': o['code'], 'shares': qty, 'price': round(p, 2),
-                     'amount': round(amt, 0), 'fees': cost, 'pnl': round(pnl, 0), 'return': pnl / basis,
-                     'entry_date': pos['entry_date'], 'reason': o['reason'] + ('（部分）' if partial else ''),
+                     'amount': round(amt, 0), 'fees': cost, 'pnl': round(pnl, 0), 'return': pnl / pos['cost'],
+                     'entry_date': pos['entry_date'], 'reason': o['reason'],
                      'r_multiple': pnl / max(1e-9, (pos['entry'] - init_stop) * qty)}
-                if partial:
-                    pos['shares'] -= qty
-                    pos['cost'] -= basis
-                    pos['tp_done'] = True
-                else:
-                    self.positions.pop(o['code'])
-                    if o.get('kind') == 'take_profit' and self.cfg.rebuy_cooldown_days:
-                        until = pd.Timestamp(d) + pd.Timedelta(days=self.cfg.rebuy_cooldown_days)
-                        self.cooldown[o['code']] = until.strftime('%Y-%m-%d')
             else:
                 p *= 1 + self.cfg.slippage
                 shares = o['shares']
@@ -177,40 +165,32 @@ class Bot:
             cfg = self.cfg
             if c is not None and cfg.breakeven_after and c >= pos['entry'] * (1 + cfg.breakeven_after):
                 pos['stop'] = max(pos['stop'], pos['entry'])          # 漲夠了，停損上移到成本
-            reason, qty, kind = None, pos['shares'], 'exit'
+            reason = None
             if c is not None and c <= pos['stop']:
                 reason = f"跌破停損 {pos['stop']}"
             elif c is not None and ctx.ma(code) is not None and c < ctx.ma(code):
                 reason = f'跌破 {cfg.ma_days} 日線'
             elif ctx.revenue_down(code):
                 reason = f'營收連 {cfg.rev_months} 個月年減'
-            elif c is not None and cfg.take_profit_pct and not pos.get('tp_done') \
-                    and c >= pos['entry'] * (1 + cfg.take_profit_pct):
-                reason, kind = f'停利 +{cfg.take_profit_pct:.0%}', 'take_profit'
-                if cfg.take_profit_fraction < 1 and pos['shares'] > 1:
-                    qty = max(1, math.floor(pos['shares'] * cfg.take_profit_fraction))
             if reason:
-                orders.append({'side': 'sell', 'code': code, 'shares': qty, 'reason': reason, 'kind': kind,
+                orders.append({'side': 'sell', 'code': code, 'shares': pos['shares'], 'reason': reason,
                                'signal_date': d, 'ref_price': c})
-        selling = {o['code']: o['shares'] for o in orders}
+        selling = {o['code'] for o in orders}
+        kept = {c: p for c, p in self.positions.items() if c not in selling}
         # 進場
-        open_risk = sum(max(0.0, (ctx.close(c) or p['entry']) - p['stop']) * (p['shares'] - selling.get(c, 0))
-                        for c, p in self.positions.items())
-        # 族群持股數（不含明天全部賣出的持股）
+        open_risk = sum(max(0.0, (ctx.close(c) or p['entry']) - p['stop']) * p['shares'] for c, p in kept.items())
+        # 族群持股數（不含明天要賣出的持股）
         theme_of = ctx.themes or (lambda c: set())
         theme_count: dict[str, int] = {}
-        for c, p in self.positions.items():
-            if selling.get(c, 0) < p['shares']:
-                for t in theme_of(c):
-                    theme_count[t] = theme_count.get(t, 0) + 1
+        for c in kept:
+            for t in theme_of(c):
+                theme_count[t] = theme_count.get(t, 0) + 1
         # 可用現金 = 現有現金 + 明天賣出的預估所得（先賣後買）
         cash = self.cash + sum((ctx.close(o['code']) or 0) * o['shares'] * (1 - self.cfg.tax_rate) for o in orders)
         for cand in ctx.candidates:
             code, price = cand['code'], cand['close']
             if code in self.positions or not price or price <= 0:
                 continue
-            if self.cooldown.get(code, '') >= d:
-                continue                       # 剛停利出場，冷卻期內不買回（換股）
             cap = self.cfg.max_per_theme
             if cap and any(theme_count.get(t, 0) >= cap for t in theme_of(code)):
                 continue                       # 這檔所屬的族群已經持滿，看下一檔
@@ -253,8 +233,6 @@ def exit_kind(reason: str) -> str:
         return '跌破 120 日線'
     if reason.startswith('營收'):
         return '營收連 2 月年減'
-    if reason.startswith('停利'):
-        return '停利'
     return reason
 
 

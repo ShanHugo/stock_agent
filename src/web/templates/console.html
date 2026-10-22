@@ -499,7 +499,6 @@ async function loadPaper() {
   $('pp-rules').textContent = `自 ${v.start} 起，起始資金 ${fmt(v.capital, 0)} 元。規則：上市＋上櫃電子股中最近 2 個月營收都年增、站上 120 日線者，依營收年增率由高到低買進；`
     + `每筆最多虧 ${plain(c.max_risk_per_trade)}、單一個股 ≤ ${plain(c.max_position_pct)}、總風險 ≤ ${plain(c.max_total_risk)}、停損設在買價下方 ${plain(c.stop_pct)}；`
     + (c.breakeven_after ? `收盤漲到成本 +${plain(c.breakeven_after)} 後，停損上移到成本價（保本）；` : '')
-    + (c.take_profit_pct ? `漲到 +${plain(c.take_profit_pct)} 停利；` : '')
     + (c.max_per_theme ? `同一族群（記憶體、PCB…）最多同時持有 ${c.max_per_theme} 檔；` : '')
     + `跌破停損、跌破 120 日線或營收連 2 月年減就賣。隔天 09:30 以即時報價成交（買用最佳賣價、賣用最佳買價；沒執行到則以開盤價），手續費 ${+(c.fee_discount * 10).toFixed(2)} 折（最低 ${c.min_fee} 元）。這是模擬，不是買賣建議。`
     + (d.paused ? `　暫停資訊：${d.paused_info}` : '');

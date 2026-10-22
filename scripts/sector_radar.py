@@ -24,7 +24,7 @@ from src.app.lab import market as mk
 from src.app.lab import radar
 from src.app.lab.constituents import members_on
 from src.app.lab.features import raw_panels
-from src.app.lab.themes import load_code_themes, refresh_chains, THEMES
+from src.app.lab.themes import load_code_themes, refresh_chains
 
 STATE = _ROOT / 'state' / 'radar'
 NAMES = {'rev_yoy': '營收年增（中位數）', 'rev_breadth': '連 2 月營收年增比例', 'r20': '近 20 日漲跌', 'r60': '近 60 日漲跌',

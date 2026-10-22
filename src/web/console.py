@@ -71,11 +71,11 @@ def overview(refresh: bool = False):
     from src.app.alerts.portfolio import load_portfolio
     from src.app.alerts.runner import run_alerts
     from src.app.config.settings import settings
-    from src.app.data.fetch import fetch_ohlcv_yf
+    from src.app.data.fetch import fetch_ohlcv_tw
     portfolio = load_portfolio(PORTFOLIO)
     now = datetime.now(ZoneInfo('Asia/Taipei'))
     # 不傳 state_path：只看狀態，不影響每日提醒的「是否已通知」紀錄
-    res = run_alerts(portfolio, fetch_ohlcv_yf, today=now.date(), now=now, default_tw_fee_bps=settings.tx_fee_bps,
+    res = run_alerts(portfolio, fetch_ohlcv_tw, today=now.date(), now=now, default_tw_fee_bps=settings.tx_fee_bps,
                      state_path=None, narrator=None, force=True, revenue_lookup=None)
     data = {k: res.get(k) for k in ('evaluations', 'allocation', 'risk', 'fx', 'errors', 'reviews', 'run_at')}
     data['watchlist'] = portfolio.watchlist
@@ -83,7 +83,7 @@ def overview(refresh: bool = False):
         from src.app.alerts.runner import FX_SYMBOL
         from datetime import timedelta
         try:
-            fx_df = fetch_ohlcv_yf(FX_SYMBOL, (now.date() - timedelta(days=10)).isoformat(),
+            fx_df = fetch_ohlcv_tw(FX_SYMBOL, (now.date() - timedelta(days=10)).isoformat(),
                                    (now.date() + timedelta(days=1)).isoformat())
             data['fx'] = float(fx_df['close'].dropna().iloc[-1])
         except Exception as e:      # noqa: BLE001

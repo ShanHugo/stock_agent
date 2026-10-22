@@ -18,7 +18,7 @@ if str(_ROOT) not in sys.path:
 os.chdir(_ROOT)
 
 from src.app.config.settings import settings
-from src.app.data.fetch import fetch_ohlcv_yf
+from src.app.data.fetch import fetch_ohlcv_tw
 from src.app.alerts import load_portfolio
 from src.app.alerts.narrate import OllamaNarrator
 from src.app.alerts.notify import send_discord
@@ -40,7 +40,7 @@ def main() -> int:
         print('[skip] 週末不發盤前簡報')
         return 0
     portfolio = load_portfolio(args.portfolio)
-    b = build_briefing(portfolio, now=now, price_fetcher=fetch_ohlcv_yf, default_tw_fee_bps=settings.tx_fee_bps,
+    b = build_briefing(portfolio, now=now, price_fetcher=fetch_ohlcv_tw, default_tw_fee_bps=settings.tx_fee_bps,
                        include_news=not args.no_news)
     narrator = None if args.no_narrate else OllamaNarrator(
         model=os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'), url=os.getenv('OLLAMA_URL', 'http://localhost:11434'))

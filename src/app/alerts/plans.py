@@ -89,11 +89,6 @@ def size_position(*, capital: float, max_risk_per_trade: float, entry: float, st
     }
 
 
-def actual_risk(shares: float, entry: float, stop: float, capital: float) -> dict:
-    risk = max(0.0, (entry - stop) * shares)
-    return {'risk_at_stop': risk, 'risk_pct': risk / capital}
-
-
 # --- 計畫檔（state/plans.json）---
 
 def load_plans(path: Path) -> list[dict]:

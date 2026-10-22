@@ -58,18 +58,17 @@ pip install -r requirements.txt
 
 每個按鈕都是呼叫下面同一支命令列程式，結果完全相同；推送、記錄交易等會改變資料的動作會先跳出確認。
 
-### 3. 執行每日例行流程
-```bash
-python src/app/ops/run_daily.py                       # 有 sample_data.csv 時讀本地檔
-python src/app/ops/run_daily.py --ignore-local --start 2025-01-01
-```
+### 3. 每日排程一覽（平日）
+| 時間 | 排程 | 內容 |
+|---|---|---|
+| 08:30 | morning_brief | 盤前簡報（含族群雷達、族群新聞、今天的模擬單） |
+| 09:30 | paper_exec | 模擬帳戶以盤中零股五檔成交 |
+| 14:30 | check_alerts | 持股提醒 |
+| 16:30 | forward_test | 前瞻測試紀錄 |
+| 16:45 | sector_radar | 族群雷達 |
+| 16:50 | paper_bot | 模擬帳戶收盤記帳、排定下一個交易日的單 |
 
-流程：**Data QA → PM/Risk → Execution（模擬）→ 稽核紀錄**（`src/app/pipeline/`）
-- 所有判斷與數字都由 Python 規則算出。
-- Data QA 有 FAIL 時停止；Kill-Switch 觸發時 Execution 停止新單。
-- 預設只做多（台股放空需融券），`--allow-short` 允許空方；`--strategy mean_reversion` 切換策略。
-- 每次執行寫一份稽核 JSON：`reports/<日期>/pipeline_<代號>_<時間>.json`（參數、資料指紋、各階段結果）。
-- 網頁介面（`python -m src.web.app`）也有「每日流程」區塊，對應 `POST /api/pipeline`。
+以系統管理員身分執行 `scripts\register_tasks.ps1` 建立（不需登入即可執行）；加 `-Disable` 全部停用。
 
 ### 4. 持股提醒（Discord）
 支援台股（上市/上櫃，含零股）與美股（含碎股，例如複委託 VOO）。三種提醒，門檻都由你在 `portfolio.json` 設定：
@@ -182,7 +181,10 @@ python scripts/forward_test.py --dry-run  # 只顯示
 - 操作台「選股研究」分頁可看最新名單與累積結果。這是驗證規則用的紀錄，不是買賣建議。
 
 ### 8. 測試
-- 以 `sample_data.csv` 驗證端到端流程
+```bash
+.venv\Scripts\python.exe -m pytest -q
+```
+網路請求一律以假資料替代，不會連線或推送。
 
 ---
 

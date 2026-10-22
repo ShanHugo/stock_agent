@@ -76,6 +76,13 @@ class TestBot(unittest.TestCase):
         got = [o['code'] for o in bot.decide('2026-10-20', c) if o['side'] == 'buy']
         self.assertEqual(got, ['M2', 'P1', 'X'])       # M3 屬於已滿 2 檔的記憶體 → 跳過；沒有族群的 X 不受限
 
+    def test_old_state_with_removed_settings_still_loads(self):
+        d = self.bot.to_dict()
+        d['cfg']['theme_loss_limit'] = 4                    # 已移除的設定
+        d['theme_block'] = {'記憶體': '2026-12-01'}
+        b2 = Bot.from_dict(d)
+        self.assertEqual(b2.cfg.capital, 12_376)
+        self.assertFalse(hasattr(b2.cfg, 'theme_loss_limit'))
     def test_unfilled_sell_not_duplicated(self):
         self._hold(self.bot, code='L', shares=10, entry=100.0)
         self.bot.decide('2026-10-20', ctx({'L': 85.0}, ma={'L': 100.0}))           # 跌破停損 → 賣單
@@ -107,40 +114,6 @@ class TestBot(unittest.TestCase):
         bot.positions[code] = {'shares': shares, 'entry': entry, 'entry_date': '2026-10-01', 'stop': entry * 0.9,
                                'init_stop': entry * 0.9, 'cost': shares * entry + 1}
         bot.mark('2026-10-20', lambda c: entry)
-
-    def test_take_profit_full_with_cooldown(self):
-        bot = Bot.new(Config(capital=12_376, take_profit_pct=0.2, rebuy_cooldown_days=30))
-        self._hold(bot)
-        cand = [{'code': 'A', 'close': 121.0, 'rev_yoy': 90}]
-        orders = bot.decide('2026-10-20', ctx({'A': 121.0}, ma={'A': 100.0}, cands=cand))
-        self.assertEqual([(o['side'], o['shares'], o['kind']) for o in orders], [('sell', 20, 'take_profit')])
-        bot.execute('2026-10-21', lambda c: 121.0)
-        self.assertNotIn('A', bot.positions)
-        self.assertEqual(bot.cooldown['A'], '2026-11-20')
-        bot.mark('2026-10-21', lambda c: 121.0)
-        self.assertEqual(bot.decide('2026-10-21', ctx({'A': 121.0}, ma={'A': 100.0}, cands=cand)), [])   # 冷卻中不買回
-        self.assertTrue(bot.decide('2026-11-21', ctx({'A': 121.0}, ma={'A': 100.0}, cands=cand)))        # 冷卻期過可再買
-
-    def test_take_profit_rebuy_allowed_without_cooldown(self):
-        bot = Bot.new(Config(capital=12_376, take_profit_pct=0.2))
-        self._hold(bot)
-        bot.decide('2026-10-20', ctx({'A': 121.0}, ma={'A': 100.0}))
-        bot.execute('2026-10-21', lambda c: 121.0)
-        bot.mark('2026-10-21', lambda c: 121.0)
-        orders = bot.decide('2026-10-21', ctx({'A': 121.0}, ma={'A': 100.0}, cands=[{'code': 'A', 'close': 121.0, 'rev_yoy': 90}]))
-        self.assertEqual(orders[0]['side'], 'buy')
-
-    def test_partial_take_profit_only_once(self):
-        bot = Bot.new(Config(capital=12_376, take_profit_pct=0.2, take_profit_fraction=0.5))
-        self._hold(bot, shares=21)
-        orders = bot.decide('2026-10-20', ctx({'A': 125.0}, ma={'A': 100.0}))
-        self.assertEqual(orders[0]['shares'], 10)
-        t = bot.execute('2026-10-21', lambda c: 125.0)[0]
-        self.assertIn('部分', t['reason'])
-        self.assertEqual(bot.positions['A']['shares'], 11)
-        self.assertAlmostEqual(bot.positions['A']['cost'], (21 * 100 + 1) * 11 / 21)
-        bot.mark('2026-10-21', lambda c: 130.0)
-        self.assertEqual(bot.decide('2026-10-21', ctx({'A': 130.0}, ma={'A': 100.0})), [])    # 不重複停利
 
     def test_breakeven_stop(self):
         bot = Bot.new(Config(capital=12_376, breakeven_after=0.2))

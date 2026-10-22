@@ -17,7 +17,6 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 os.chdir(_ROOT)
 
-import pandas as pd
 
 from src.app.lab.universe import fetch_universe
 from src.app.lab.data import build_dataset

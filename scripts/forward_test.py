@@ -18,7 +18,6 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 os.chdir(_ROOT)
 
-import pandas as pd
 from dotenv import load_dotenv
 
 from src.app.lab import market as mk
