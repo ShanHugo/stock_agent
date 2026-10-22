@@ -286,6 +286,7 @@ button.b.mini { padding: 3px 10px; font-size: 13px; }
     <div id="pp-out"></div>
   </div>
   <div class="kpis" id="pp-kpis"></div>
+  <div class="card"><div class="md" id="pp-scorecard"><p class="hint">還沒有成績單。每個月第一個交易日收盤後自動產生。</p></div></div>
   <div class="card">
     <h2>淨值走勢（同樣起始資金放 0050 比較）</h2>
     <div id="pp-chart"></div>
@@ -495,6 +496,7 @@ async function loadPaper() {
   $('pp-pause').textContent = d.paused ? '恢復模擬帳戶' : '暫停模擬帳戶';
   if (!d.exists) { $('pp-rules').textContent = '還沒有模擬帳戶。按「立即執行今天的流程」建立。'; return; }
   const v = d.view, s = v.summary, c = v.config;
+  if (d.scorecard) $('pp-scorecard').innerHTML = md(d.scorecard);
   $('pp-time').textContent = `資料至 ${v.last_date} 收盤，更新於 ${v.updated.replace('T', ' ').slice(0, 16)}`;
   $('pp-rules').textContent = `自 ${v.start} 起，起始資金 ${fmt(v.capital, 0)} 元。規則：上市＋上櫃電子股中最近 2 個月營收都年增、站上 120 日線者，依營收年增率由高到低買進；`
     + `每筆最多虧 ${plain(c.max_risk_per_trade)}、單一個股 ≤ ${plain(c.max_position_pct)}、總風險 ≤ ${plain(c.max_total_risk)}、停損設在買價下方 ${plain(c.stop_pct)}；`

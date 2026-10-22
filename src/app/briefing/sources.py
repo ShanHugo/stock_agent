@@ -125,6 +125,16 @@ def parse_fomc(html: str) -> list[dict]:
     return meetings
 
 
+# BEA 發布很多項目，只留會影響股市的全國性數據：GDP、個人所得與支出（含 PCE 物價）、國際貿易、企業利潤
+BEA_KEEP = re.compile(r'\bGDP\b|Gross Domestic Product|Personal Income and Outlays|International Trade in Goods and Services'
+                      r'|Corporate Profits', re.I)
+BEA_SKIP = re.compile(r'\b(by State|States|State|County|Counties|Metropolitan|Puerto Rico|Territor\w*)\b', re.I)
+
+
+def market_moving_bea(label: str) -> bool:
+    return bool(BEA_KEEP.search(label)) and not BEA_SKIP.search(label)
+
+
 def parse_bea(html: str) -> list[dict]:
     soup = BeautifulSoup(html, 'lxml')
     year, out = None, []
@@ -140,10 +150,13 @@ def parse_bea(html: str) -> list[dict]:
         m = re.match(r'([A-Za-z]+) (\d{1,2})\s+(\d{1,2}:\d{2}) ([AP]M)', d_td.get_text(' ', strip=True))
         if not m or m.group(1)[:3] not in MONTHS:
             continue
+        label = t_td.get_text(' ', strip=True)
+        if not market_moving_bea(label):
+            continue
         hh, mm = map(int, m.group(3).split(':'))
         hh = hh % 12 + (12 if m.group(4) == 'PM' else 0)
         out.append({'date': date(year, MONTHS[m.group(1)[:3]], int(m.group(2))), 'time_et': time(hh, mm),
-                    'label': t_td.get_text(' ', strip=True)})
+                    'label': label})
     return out
 
 

@@ -56,5 +56,37 @@ class TestFetchTw(unittest.TestCase):
         self.assertEqual(df.iloc[-1]['close'], 108.15)                                # Yahoo 整個失敗也有官方收盤
 
 
+def chart(price, at, end):
+    js = {'chart': {'result': [{'meta': {'regularMarketPrice': price, 'regularMarketTime': at,
+                                         'exchangeTimezoneName': 'America/New_York',
+                                         'currentTradingPeriod': {'regular': {'end': end}}}}]}}
+    return lambda *a, **k: mock.Mock(json=lambda: js)
+
+
+class TestUsMissingClose(unittest.TestCase):
+    CLOSE_1021 = 1792612800          # 2026-10-21 16:00 美東（收盤）
+
+    def df(self):
+        return yahoo([('2026-10-20', 704, 707, 703, 706.8, 1), ('2026-10-21', 708.8, 712, 707, np.nan, 1)])
+
+    def test_fills_after_close(self):
+        out = fetch.fill_missing_close(self.df(), 'VOO', get=chart(710.72, self.CLOSE_1021, self.CLOSE_1021))
+        self.assertEqual(out.iloc[-1]['close'], 710.72)
+
+    def test_ignores_intraday_price(self):
+        out = fetch.fill_missing_close(self.df(), 'VOO', get=chart(709.0, self.CLOSE_1021 - 3600, self.CLOSE_1021))
+        self.assertTrue(np.isnan(out.iloc[-1]['close']))
+
+    def test_ignores_other_day(self):
+        close_1022 = self.CLOSE_1021 + 86400
+        out = fetch.fill_missing_close(self.df(), 'VOO', get=chart(715.0, close_1022, close_1022))
+        self.assertTrue(np.isnan(out.iloc[-1]['close']))
+
+    def test_no_request_when_close_present(self):
+        df = yahoo([('2026-10-21', 708.8, 712, 707, 710.72, 1)])
+        boom = mock.Mock(side_effect=AssertionError('不該連線'))
+        self.assertEqual(fetch.fill_missing_close(df, 'VOO', get=boom).iloc[-1]['close'], 710.72)
+
+
 if __name__ == '__main__':
     unittest.main()

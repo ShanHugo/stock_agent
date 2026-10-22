@@ -33,10 +33,50 @@ def fetch_ohlcv_yf(symbol: str, start: str, end: str) -> pd.DataFrame:
 
 
 PATCH_DAYS = 6       # 往回檢查幾個平日
+YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}'
+
+
+def yahoo_official_close(symbol: str, get=None) -> tuple[pd.Timestamp, float] | None:
+    """Yahoo chart API 的 regularMarketPrice：只有在報價時間 ≥ 當天正規盤收盤時間時才當作收盤價。
+    回傳 (交易日, 收盤價)，盤中或拿不到時回傳 None。"""
+    import requests
+    from zoneinfo import ZoneInfo
+    get = get or requests.get
+    try:
+        js = get(YAHOO_CHART.format(symbol=symbol), params={'range': '5d', 'interval': '1d'},
+                 headers={'User-Agent': 'Mozilla/5.0'}, timeout=20).json()
+        meta = js['chart']['result'][0]['meta']
+        price, at = meta.get('regularMarketPrice'), meta.get('regularMarketTime')
+        end = meta['currentTradingPeriod']['regular']['end']
+        tz = ZoneInfo(meta.get('exchangeTimezoneName') or 'America/New_York')
+    except Exception:       # noqa: BLE001
+        return None
+    if not price or not at:
+        return None
+    t_at, t_end = datetime.fromtimestamp(at, tz), datetime.fromtimestamp(end, tz)
+    # 報價時間要在「同一天」正規盤收盤之後，才是收盤價
+    if t_at.date() != t_end.date() or at < end - 60:
+        return None
+    return pd.Timestamp(t_at.date()), float(price)
+
+
+def fill_missing_close(df: pd.DataFrame, symbol: str, get=None) -> pd.DataFrame:
+    """最後一根日線收盤是空值（Yahoo 偶爾如此）時，用 chart API 的收盤價補上。"""
+    if df.empty or pd.notna(df['close'].iloc[-1]):
+        return df
+    got = yahoo_official_close(symbol, get=get)
+    if not got:
+        return df
+    day, price = got
+    if pd.Timestamp(df.index[-1]).normalize() == day:
+        df = df.copy()
+        df.iloc[-1, df.columns.get_loc('close')] = price
+    return df
 
 
 def fetch_ohlcv_tw(symbol: str, start: str, end: str, *, quotes=None, today=None) -> pd.DataFrame:
-    """yfinance 日線，台股（.TW／.TWO）最近幾個交易日改用證交所／櫃買中心的官方收盤行情補上或更正。
+    """yfinance 日線。台股（.TW／.TWO）最近幾個交易日改用證交所／櫃買中心的官方收盤行情補上或更正；
+    其他（美股、匯率等）最後一天收盤是空值時，用 Yahoo chart API 收盤後的價格補上。
 
     Yahoo 的台股日線偶爾會延遲或把當天收盤變成空值（例如 2026-10-21 晚上 0050 的 10/21 收盤消失），
     官方行情則在收盤後就公布。非台股代號直接回傳 yfinance 的結果。
@@ -51,7 +91,7 @@ def fetch_ohlcv_tw(symbol: str, start: str, end: str, *, quotes=None, today=None
         df = pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'], dtype=float)
         df.index = pd.DatetimeIndex([], name='date')
     if not tw:
-        return df
+        return fill_missing_close(df, symbol)        # 美股等：最後一天收盤空值時用 Yahoo chart API 補
     if quotes is None:
         from ..lab.market import quotes_day as quotes
     code, suffix = symbol.upper().rsplit('.', 1)

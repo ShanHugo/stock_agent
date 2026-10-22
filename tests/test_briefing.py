@@ -25,8 +25,12 @@ BEA_HTML = """<table>
 <tr><th>Year 2026</th><th></th><th>Release</th></tr>
 <tr><td class="scheduled-date no-wrap">October 29 8:30 AM</td><td>News</td>
 <td class="release-title">GDP (Advance Estimate), 3rd Quarter 2026</td></tr>
+<tr><td class="scheduled-date no-wrap">October 22 10:00 AM</td><td>News</td>
+<td class="release-title">Experimental Research and Development Economic Statistics, U.S. and States, 2024</td></tr>
+<tr><td class="scheduled-date no-wrap">October 30 10:00 AM</td><td>News</td>
+<td class="release-title">GDP by State and Personal Income by State, 2nd Quarter 2026</td></tr>
 <tr><td class="scheduled-date no-wrap">November 4 10:00 AM</td><td>News</td>
-<td class="release-title">Trade</td></tr></table>"""
+<td class="release-title">U.S. International Trade in Goods and Services, September 2026</td></tr></table>"""
 
 TAIFEX = [
     {'Date': '20261019', 'Contract': 'TX', 'ContractMonth(Week)': '202611', 'TradingSession': '一般', 'Last': '46948'},
@@ -38,6 +42,16 @@ TAIFEX = [
 
 
 class TestParsers(unittest.TestCase):
+    def test_market_moving_bea(self):
+        keep = ['GDP (Advance Estimate), 3rd Quarter 2026', 'Personal Income and Outlays, September 2026',
+                'U.S. International Trade in Goods and Services, September 2026',
+                'GDP (Third Estimate), GDP by Industry, and Corporate Profits (Revised), 2nd Quarter 2026']
+        drop = ['Experimental Research and Development Economic Statistics, U.S. and States, 2024',
+                'GDP by State and Personal Income by State, 2nd Quarter 2026', 'GDP by County and Metropolitan Area, 2025',
+                'U.S. International Investment Position, 2nd Quarter 2026', 'Travel and Tourism Satellite Account, 2025']
+        self.assertTrue(all(src.market_moving_bea(x) for x in keep))
+        self.assertFalse(any(src.market_moving_bea(x) for x in drop))
+
     def test_fomc(self):
         m = src.parse_fomc(FOMC_HTML)
         self.assertEqual([x['date'] for x in m], [date(2026, 10, 28), date(2026, 12, 9), date(2027, 5, 1)])
@@ -47,7 +61,8 @@ class TestParsers(unittest.TestCase):
 
     def test_bea(self):
         ev = src.parse_bea(BEA_HTML)
-        self.assertEqual(len(ev), 2)
+        self.assertEqual(len(ev), 2)                       # 研發統計、州別 GDP 不影響股市，不列
+        self.assertNotIn('Research', ' '.join(e['label'] for e in ev))
         self.assertEqual((ev[0]['date'], ev[0]['time_et'].hour), (date(2026, 10, 29), 8))
         self.assertEqual(ev[1]['time_et'].hour, 10)
         # 11/4 美國已回到標準時間：10:00 ET = 23:00 台北

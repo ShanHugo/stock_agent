@@ -265,8 +265,10 @@ def _read_json(path: Path):
 def paper():
     view = _read_json(PAPER / 'latest.json')
     paused = PAPER / 'paused'
+    card = PAPER / 'scorecard.md'
     return {'exists': view is not None, 'view': view, 'backtest': _read_json(PAPER / 'backtest.json'),
             'luck': _read_json(PAPER / 'luck.json'),
+            'scorecard': card.read_text(encoding='utf-8') if card.exists() else None,
             'paused': paused.exists(), 'paused_info': paused.read_text(encoding='utf-8').strip() if paused.exists() else None}
 
 

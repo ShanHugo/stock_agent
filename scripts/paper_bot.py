@@ -151,6 +151,9 @@ def run_backtest(log) -> int:
     (STATE / 'backtest.json').write_text(json.dumps({'date': str(today), 'report': out.name, 'summary': s,
                                                      'yearly': {str(k): v for k, v in yearly.to_dict('index').items()}},
                                                     ensure_ascii=False, indent=1, default=float), encoding='utf-8')
+    # 每日淨值與同資金 0050：月成績單用來算「歷史上同樣長度期間」的正常範圍
+    pd.DataFrame({'equity': eq, 'bench': b / b.iloc[0] * cfg.capital}).rename_axis('date').reset_index().assign(
+        date=lambda x: x['date'].dt.strftime('%Y-%m-%d')).to_json(STATE / 'backtest_curve.json', orient='records')
     print('\n'.join(L))
     print(f'[saved] {out}', file=sys.stderr)
     return 0
@@ -185,6 +188,37 @@ def raw_quote(d, field):
 
 
 PAUSED = STATE / 'paused'
+SCORE_STATE = STATE / 'scorecard_state.json'
+
+
+def make_scorecard(month_label: str | None = None) -> tuple[dict, str] | None:
+    """依目前帳戶與歷史模擬淨值產生成績單，存成 state/paper_bot/scorecard.{json,md}；月報另存 reports/。"""
+    from src.app.lab import scorecard as scm
+    view_p, curve_p, state_p = STATE / 'latest.json', STATE / 'backtest_curve.json', STATE / 'state.json'
+    if not (view_p.exists() and curve_p.exists() and state_p.exists()):
+        return None
+    view = json.loads(view_p.read_text(encoding='utf-8'))
+    curve = pd.read_json(curve_p, orient='records', convert_dates=False)
+    trades = json.loads(state_p.read_text(encoding='utf-8'))['trades']
+    sc = scm.evaluate(view, curve, trades)
+    text = scm.render(sc, month_label)
+    (STATE / 'scorecard.json').write_text(json.dumps(sc, ensure_ascii=False, indent=1, default=float), encoding='utf-8')
+    (STATE / 'scorecard.md').write_text(text, encoding='utf-8')
+    if month_label:
+        (_ROOT / 'reports').mkdir(exist_ok=True)
+        (_ROOT / 'reports' / f"paper_scorecard_{month_label.replace('-', '')}.md").write_text(text + '\n', encoding='utf-8')
+    return sc, text
+
+
+def monthly_scorecard_due(last_date: str, start: str) -> str | None:
+    """新的月份第一次收盤記帳時，回傳要出成績單的月份（上個月，'YYYY-MM'）；其他時候回傳 None。"""
+    st = json.loads(SCORE_STATE.read_text(encoding='utf-8')) if SCORE_STATE.exists() else {'last_month': start[:7]}
+    month = last_date[:7]
+    if month <= st['last_month']:
+        return None
+    prev = (pd.Period(month, 'M') - 1).strftime('%Y-%m')
+    SCORE_STATE.write_text(json.dumps({'last_month': month}), encoding='utf-8')
+    return prev
 MIS_ODD = 'https://mis.twse.com.tw/stock/api/getOddInfo.jsp'   # 盤中零股即時報價（五檔價量、漲跌停價）
 LIMIT_MOVE = 0.095          # 沒有五檔資料時（開盤價補成交、歷史模擬）：開盤／成交較前收 ≥ 9.5% 視為漲停買不到、≤ -9.5% 視為跌停賣不掉
 
@@ -446,13 +480,20 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
     if len(days) == 0:
         print('[skip] 沒有新的交易日（休市或今天已處理），不重複推送')
         return 0
+    messages = [text]
+    month = monthly_scorecard_due(bot.last_date, start)      # 每月第一個交易日收盤後：上個月的成績單
+    made = make_scorecard(month) if month else make_scorecard()
+    if month and made:
+        messages.append(made[1])
+        print(made[1])
     if send or os.getenv('PAPER_BOT_AUTO_SEND', '').strip() == '1':
         from src.app.alerts.notify import send_discord
         webhook = (os.getenv('PAPER_BOT_WEBHOOK_URL') or os.getenv('DISCORD_WEBHOOK_URL') or '').strip()
         if not webhook:
             print('[error] .env 未設定 PAPER_BOT_WEBHOOK_URL 或 DISCORD_WEBHOOK_URL，未推送')
             return 1
-        send_discord(webhook, text)
+        for m in messages:
+            send_discord(webhook, m)
         print('[sent] 已推送到 Discord')
     return 0
 
@@ -464,10 +505,15 @@ def main() -> int:
     p.add_argument('--reset', action='store_true', help='重新開始模擬帳戶')
     p.add_argument('--dry-run', action='store_true', help='只顯示，不寫入帳戶、不推送')
     p.add_argument('--execute-now', action='store_true', help='09:30：用即時報價執行待執行的模擬單')
+    p.add_argument('--scorecard', action='store_true', help='產生目前的成績單（不推送；每月第一個交易日收盤後會自動產生並推送）')
     args = p.parse_args()
     log = lambda m: print(m if m.startswith('[') else f'[data] {m}', file=sys.stderr)
     if args.execute_now:
         return run_execute(log, args.dry_run)
+    if args.scorecard:
+        made = make_scorecard()
+        print(made[1] if made else '[skip] 需要先有模擬帳戶與歷史模擬淨值（python scripts/paper_bot.py --backtest）')
+        return 0
     return run_backtest(log) if args.backtest else run_daily(log, args.send, args.reset, args.dry_run)
 
 
