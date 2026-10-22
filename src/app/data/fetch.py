@@ -54,8 +54,10 @@ def yahoo_official_close(symbol: str, get=None) -> tuple[pd.Timestamp, float] | 
     if not price or not at:
         return None
     t_at, t_end = datetime.fromtimestamp(at, tz), datetime.fromtimestamp(end, tz)
-    # 報價時間要在「同一天」正規盤收盤之後，才是收盤價
-    if t_at.date() != t_end.date() or at < end - 60:
+    # 報價時刻要在該交易日正規盤收盤時刻（例如美東 16:00）之後，才是收盤價。
+    # 不比對 currentTradingPeriod 的日期：過了交易所當地午夜，它會換成新的一天，但最新價仍是前一天的收盤。
+    close_minutes = t_end.hour * 60 + t_end.minute
+    if t_at.hour * 60 + t_at.minute < close_minutes - 1:
         return None
     return pd.Timestamp(t_at.date()), float(price)
 

@@ -80,7 +80,12 @@ class TestUsMissingClose(unittest.TestCase):
     def test_ignores_other_day(self):
         close_1022 = self.CLOSE_1021 + 86400
         out = fetch.fill_missing_close(self.df(), 'VOO', get=chart(715.0, close_1022, close_1022))
-        self.assertTrue(np.isnan(out.iloc[-1]['close']))
+        self.assertTrue(np.isnan(out.iloc[-1]['close']))      # 10/22 的收盤不能補到 10/21
+
+    def test_after_new_york_midnight(self):
+        # 紐約過了午夜：交易時段已換成 10/22，但最新價仍是 10/21 16:00 的收盤
+        out = fetch.fill_missing_close(self.df(), 'VOO', get=chart(710.72, self.CLOSE_1021, self.CLOSE_1021 + 86400))
+        self.assertEqual(out.iloc[-1]['close'], 710.72)
 
     def test_no_request_when_close_present(self):
         df = yahoo([('2026-10-21', 708.8, 712, 707, 710.72, 1)])
