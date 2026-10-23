@@ -6,7 +6,6 @@ import pandas as pd
 from src.app.lab.data import Dataset
 from src.app.lab.engine import run_backtest, metrics, buy_and_hold, FEE, TAX, SLIPPAGE
 from src.app.lab.rules import trend_following, revenue_momentum, value_growth
-from src.app.lab.universe import parse_moneydj_holdings, name_to_code_map
 from src.app.lab.walkforward import evaluate_family
 
 
@@ -87,18 +86,6 @@ class TestRules(unittest.TestCase):
         self.assertEqual(sig(pd.Timestamp('2024-12-31')), ['CHEAP'])  # 2024Q4 EPS 在 2025/4/1 才公布，用 2024Q3
 
 
-class TestUniverse(unittest.TestCase):
-    def test_parse_holdings(self):
-        # 與實際頁面去標籤後的格式相同：|名稱| |持股| |比例|
-        html = ('<b>元大台灣50-持股明細</b> <i>資料日期：2026/09/30</i>'
-                '<td>台積電</td> <td>562,112.00</td> <td>56.45</td>'
-                '<td>國巨*</td> <td>36,051.00</td> <td>0.80</td>')
-        date, names = parse_moneydj_holdings(html)
-        self.assertEqual((date, names), ('2026/09/30', ['台積電', '國巨']))
-        m = name_to_code_map([{'Code': '2327', 'Name': '國巨*'}, {'Code': '00881', 'Name': 'ETF'}])
-        self.assertEqual(m, {'國巨': '2327'})
-
-
 class TestWalkForward(unittest.TestCase):
     def test_selection_uses_only_past_data(self):
         idx = pd.bdate_range('2017-01-01', '2021-12-31')
@@ -113,49 +100,13 @@ class TestWalkForward(unittest.TestCase):
         self.assertEqual(r.passed, not r.reasons)
 
 
-class TestCache(unittest.TestCase):
-    def test_leading_zero_columns_survive_cache(self):
-        import tempfile
-        from pathlib import Path
-        from unittest import mock
-        from src.app.lab import data
-        df = pd.DataFrame({'0050': [1.0, 2.0], '2330': [3.0, 4.0]}, index=pd.bdate_range('2024-01-01', periods=2))
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(data, 'CACHE', Path(d)):
-            data._cache_frame('x', lambda: df)
-            back = data._cache_frame('x', lambda: None)
-        self.assertEqual(list(back.columns), ['0050', '2330'])
-        self.assertEqual(back.index[0], pd.Timestamp('2024-01-01'))
-
-
 class TestConstituents(unittest.TestCase):
-    HTML = ('<h1>臺灣證券交易所與富時國際有限公司合編之臺灣指數系列成分股定期審核結果</h1><p>2026/09/04 17:00</p>'
-            '<p>富時羅素公布下列有關臺灣50指數、臺灣中型100指數審核結果。相關成分股納入及刪除之變動將自2026年9月18日'
-            '（星期五）交易結束後生效（亦即自2026年9月21日（星期一）起生效）。</p>'
-            '<p>臺灣50指數</p><p>成分股納入：<span>藥華藥(6446)</span>。</p><p>成分股刪除：世芯-KY(3661)。</p>'
-            '<p>候補名單：台塑(1301)、群創(3481)。</p><p>臺灣中型100指數</p><p>成分股納入：晶豪科(3006)。</p>')
-
-    def test_parse(self):
-        from src.app.lab.constituents import parse_announcement
-        a = parse_announcement(self.HTML)
-        self.assertEqual(a['effective'], '2026-09-21')
-        self.assertEqual(a['added'], [('6446', '藥華藥')])
-        self.assertEqual(a['removed'], [('3661', '世芯-KY')])   # 中型100 的納入不會混進來
-
-    def test_no_change_announcement(self):
-        from src.app.lab.constituents import parse_announcement
-        html = self.HTML.replace('成分股納入：<span>藥華藥(6446)</span>。</p><p>成分股刪除：世芯-KY(3661)。', '成分股無增刪。')
-        a = parse_announcement(html)
-        self.assertEqual((a['added'], a['removed']), ([], []))
-
-    def test_membership_walk_back(self):
-        from src.app.lab.constituents import membership_history, members_on
-        changes = [{'effective': '2025-09-22', 'added': [('B', '')], 'removed': [('A', '')]},
-                   {'effective': '2026-09-21', 'added': [('C', '')], 'removed': [('B', '')]}]
-        h = membership_history({'C', 'X'}, changes)
-        self.assertEqual(members_on(h, pd.Timestamp('2026-10-01')), {'C', 'X'})
-        self.assertEqual(members_on(h, pd.Timestamp('2026-01-01')), {'B', 'X'})
-        self.assertEqual(members_on(h, pd.Timestamp('2024-01-01')), {'A', 'X'})
-        self.assertEqual(members_on(h, pd.Timestamp('2025-09-22')), {'B', 'X'})  # 生效日當天起算新名單
+    def test_members_on(self):
+        from src.app.lab.constituents import members_on
+        h = [(pd.Timestamp('2024-01-01'), {'A'}), (pd.Timestamp('2025-09-22'), {'B'}), (pd.Timestamp('2026-09-21'), {'C'})]
+        self.assertEqual(members_on(h, pd.Timestamp('2026-10-01')), {'C'})
+        self.assertEqual(members_on(h, pd.Timestamp('2025-09-22')), {'B'})      # 生效日當天起算新名單
+        self.assertEqual(members_on(h, pd.Timestamp('2023-01-01')), {'A'})      # 最早名單之前沿用第一份
 
 
 class TestShortTerm(unittest.TestCase):

@@ -137,8 +137,7 @@ python scripts/shortterm_lab.py --universe electronics   # 短期預測 + 單一
 python scripts/strategy_lab.py  --universe electronics   # 趨勢、營收動能、價值成長三類規則
 ```
 - 選股範圍：`electronics` = 上市＋上櫃電子 8 類（半導體、電腦及週邊、光電、通信網路、電子零組件、電子通路、資訊服務、其他電子），
-  每月依證交所／櫃買中心**當時**的產業分類重建名單，**含之後下市的公司**；`electronics-twse`、`electronics-tpex` 只看上市或上櫃；
-  `tw50-pit`（預設）= 臺灣50當時的成分股。
+  每月依證交所／櫃買中心**當時**的產業分類重建名單，**含之後下市的公司**；`electronics-twse`、`electronics-tpex` 只看上市或上櫃。
 - 電子股範圍的價格不用 Yahoo（沒有下市股票），改由證交所／櫃買每日收盤價自行還原除權息與減資；報告附上與 Yahoo 還原價的比對。
 - 已下市公司在公開資訊觀測站查不到月營收與財報，這兩項特徵對它們是缺值（報告會列出檔數）。
 - 單一特徵分組：每 20 個交易日把範圍內股票依營收年增、法人買超、近期漲幅、本益比位置等分 5 組，看各組之後 20 日相對表現。

@@ -3,8 +3,8 @@
 另附單一特徵分組（哪一類股票之後比較會漲）。
 
 使用範例:
-  python scripts/shortterm_lab.py                              # 臺灣50當時成分股
-  python scripts/shortterm_lab.py --universe tw-electronics    # 上市電子 8 類當時的公司
+  python scripts/shortterm_lab.py                              # 上市＋上櫃電子當時的公司（含下市）
+  python scripts/shortterm_lab.py --universe electronics-twse  # 只看上市電子
 報告輸出：reports/shortterm_lab_YYYYMMDD_<範圍>.md
 需要先回補 2018 年起的三大法人與融資資料（有快取）。
 """
@@ -18,14 +18,11 @@ if str(_ROOT) not in sys.path:
 os.chdir(_ROOT)
 
 import numpy as np
-import pandas as pd
 
-from src.app.lab.universe import fetch_universe
-from src.app.lab.data import build_dataset, load_prices, load_chips
 from src.app.lab.engine import FEE, TAX, SLIPPAGE
 from src.app.lab.features import FEATURES, HORIZON, raw_panels
 from src.app.lab.shortterm import run_shortterm, REBALANCE_EVERY, TOP_N, MDD_TOLERANCE
-from src.app.lab.constituents import scan_changes, membership_history, members_on
+from src.app.lab.constituents import members_on
 from src.app.lab.market import UNIVERSES, build_market_dataset, describe, compare_with_yahoo
 from src.app.lab.factors import factor_groups, GROUPS
 
@@ -107,33 +104,18 @@ def render(r, factors, scope, scope_detail, chip_coverage, today, notes=()) -> s
 
 def main() -> int:
     p = argparse.ArgumentParser(description='短期預測驗證')
-    p.add_argument('--universe', default='tw50-pit', choices=['tw50-pit', *UNIVERSES],
-                   help='tw50-pit = 臺灣50當時的成分股；electronics = 上市＋上櫃電子 8 類當時的公司（含下市）；'
-                        'electronics-twse / electronics-tpex = 只看上市 / 上櫃')
+    p.add_argument('--universe', default='electronics', choices=list(UNIVERSES),
+                   help='electronics = 上市＋上櫃電子 8 類當時的公司（含下市）；electronics-twse / electronics-tpex = 只看上市 / 上櫃')
     args = p.parse_args()
     today = date.today()
     log = lambda m: print(m if m.startswith('[') else f'[data] {m}', file=sys.stderr)
-    extra_notes = []
-    if args.universe in UNIVERSES:
-        built = build_market_dataset(UNIVERSES[args.universe], start=DATA_START, chips_start=CHIPS_START,
-                                     today=today, log=log)
-        ds, history, codes, volume, chips = built['ds'], built['history'], built['codes'], built['volume'], built['chips']
-        scope, scope_detail = describe(UNIVERSES[args.universe], built)
-        extra_notes = ds.notes + compare_with_yahoo(ds.prices, YAHOO_CHECK, DATA_START)
-        end = ds.prices.index[-1]
-        chip_days = ds.prices.loc[CHIPS_START:].index
-    else:
-        universe = fetch_universe(['0050', '00881'])
-        changes = [c for c in scan_changes(470) if c['effective']]
-        history = membership_history(set(universe['etfs']['0050']['codes']), changes)
-        scope = '臺灣50成分股'
-        scope_detail = f'臺灣50指數「當時」的成分股（由 {len(changes)} 次公告變動重建）'
-        codes = sorted(set().union(*[m for _, m in history]))
-        ds = build_dataset(codes, start=DATA_START, today=today, progress=log)
-        end = ds.prices.index[-1]
-        volume = load_prices(codes, DATA_START, (end + pd.Timedelta(days=1)).strftime('%Y-%m-%d'), field='Volume')
-        chip_days = ds.prices.loc[CHIPS_START:].index
-        chips = load_chips(codes, chip_days)
+    built = build_market_dataset(UNIVERSES[args.universe], start=DATA_START, chips_start=CHIPS_START,
+                                 today=today, log=log)
+    ds, history, codes, volume, chips = built['ds'], built['history'], built['codes'], built['volume'], built['chips']
+    scope, scope_detail = describe(UNIVERSES[args.universe], built)
+    extra_notes = ds.notes + compare_with_yahoo(ds.prices, YAHOO_CHECK, DATA_START)
+    end = ds.prices.index[-1]
+    chip_days = ds.prices.loc[CHIPS_START:].index
     coverage = chips['foreign'].dropna(how='all').shape[0] / max(len(chip_days), 1)
     print(f'[data] 法人資料涵蓋 {coverage:.0%} 交易日', file=sys.stderr)
     panels = raw_panels(ds, volume, chips, codes)

@@ -19,7 +19,6 @@ os.chdir(_ROOT)
 
 import pandas as pd
 
-from src.app.lab.constituents import members_on
 from src.app.lab.data import BENCHMARK
 from src.app.lab.market import UNIVERSES, CACHE, build_market_dataset, describe, ohlc_day, raw_panels
 from src.app.lab import technical as tech

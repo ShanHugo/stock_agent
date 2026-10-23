@@ -23,7 +23,7 @@ MONTH = re.compile(r'^\d{4}-\d{2}$')
 INVALID = re.compile(r'^[a-z_]+(:[0-9.\-]+){1,3}$')
 PLAN_ID = re.compile(r'^[0-9A-Za-z_\-]{1,40}$')
 LAB_SCRIPTS = {'shortterm': 'shortterm_lab.py', 'strategy': 'strategy_lab.py'}
-LAB_UNIVERSES = ('electronics', 'electronics-twse', 'electronics-tpex', 'tw50-pit')
+LAB_UNIVERSES = ('electronics', 'electronics-twse', 'electronics-tpex')
 
 
 class BadRequest(ValueError):
