@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股操作台</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+  --accent: #2856d8; --accent-ink: #ffffff; --good: #0f7b4f; --bad: #c0392b; --warn: #b7791f;
+  --good-bg: #e7f5ee; --bad-bg: #fbeaea; --warn-bg: #fdf3e1; --code-bg: #f1f3f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1b1f27; --ink: #e6e8ec; --muted: #9aa3b2; --line: #2c323d;
+    --accent: #6d8ff0; --accent-ink: #0d1117; --good: #4cc38a; --bad: #f07167; --warn: #e7b04a;
+    --good-bg: #16302a; --bad-bg: #3a1f22; --warn-bg: #3a2f17; --code-bg: #242a35;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.55 system-ui, "Segoe UI", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--ink); }
+header { display: flex; align-items: center; gap: 24px; padding: 14px 24px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 18px; margin: 0; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav button { border: 0; background: none; color: var(--muted); padding: 7px 12px; border-radius: 8px; font: inherit; cursor: pointer; }
+nav button.on { background: var(--accent); color: var(--accent-ink); }
+#envbar { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; gap: 12px; }
+main { max-width: 1180px; margin: 0 auto; padding: 22px 24px 60px; }
+section.tab { display: none; } section.tab.on { display: block; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }
+.card h2 { font-size: 16px; margin: 0 0 12px; }
+.row { display: flex; gap: 18px; flex-wrap: wrap; } .row > .card { flex: 1 1 340px; min-width: 0; }
+.kpis { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.kpi { flex: 1 1 160px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.kpi .v { font-size: 22px; font-weight: 600; } .kpi .l { font-size: 13px; color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 13px; color: var(--muted); font-weight: 500; }
+td.num, th.num { text-align: right; }
+.scroll { overflow-x: auto; }
+.pos { color: var(--good); } .neg { color: var(--bad); }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; }
+.tag.ok { background: var(--good-bg); color: var(--good); } .tag.bad { background: var(--bad-bg); color: var(--bad); } .tag.warn { background: var(--warn-bg); color: var(--warn); }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; }
+textarea { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 14px; }
+.check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 14px; margin: 10px 14px 0 0; }
+.check input { width: auto; }
+.checks { display: flex; flex-wrap: wrap; }
+.btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+button.b { border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 16px; border-radius: 8px; font: inherit; cursor: pointer; }
+button.b.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.b.danger { color: var(--bad); border-color: var(--bad); }
+button.b:disabled { opacity: .5; cursor: wait; }
+.hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+.out { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.out .meta { font-size: 13px; color: var(--muted); margin-bottom: 8px; display: flex; gap: 10px; align-items: center; }
+.md { overflow-wrap: anywhere; } .md h1 { font-size: 20px; } .md h2 { font-size: 17px; margin-top: 22px; } .md h3 { font-size: 15px; }
+.md table { margin: 10px 0; font-size: 14px; } .md td, .md th { white-space: normal; }
+.md code, .md pre { background: var(--code-bg); border-radius: 6px; } .md code { padding: 1px 5px; } .md pre { padding: 10px; overflow-x: auto; }
+.md blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--muted); }
+.md .log { color: var(--muted); font-family: Consolas, monospace; font-size: 12.5px; margin: 0; white-space: pre-wrap; }
+.md a { color: var(--accent); }
+.progress { height: 10px; background: var(--code-bg); border-radius: 999px; overflow: hidden; margin: 6px 0 2px; }
+.progress > div { height: 100%; background: var(--accent); }
+.list { display: flex; flex-direction: column; gap: 4px; max-height: 420px; overflow-y: auto; }
+.list button { text-align: left; border: 1px solid transparent; background: none; color: var(--ink); padding: 8px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
+.list button:hover, .list button.on { background: var(--code-bg); border-color: var(--line); }
+.list small { color: var(--muted); display: block; }
+.list button { overflow-wrap: anywhere; }
+.rd-row { cursor: pointer; } .rd-row:hover { background: var(--code-bg); }
+.arrow { display: inline-block; width: 14px; color: var(--accent); font-size: 12px; }
+.rd-detail > td { background: var(--bg); padding: 10px 12px 16px; white-space: normal; }
+.rd-stocks table { font-size: 13.5px; } .rd-stocks td, .rd-stocks th { white-space: nowrap; }
+button.b.mini { padding: 3px 10px; font-size: 13px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.chip { background: var(--code-bg); border-radius: 999px; padding: 3px 6px 3px 12px; display: inline-flex; gap: 6px; align-items: center; }
+.chip button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; }
+.err { color: var(--bad); }
+.toast { position: fixed; right: 20px; bottom: 20px; background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; max-width: 420px; display: none; z-index: 10; }
+@media (max-width: 640px) { header, main { padding-left: 16px; padding-right: 16px; } #envbar { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>台股操作台</h1>
+  <nav id="nav">
+    <button data-tab="overview" class="on">持股總覽</button>
+    <button data-tab="brief">簡報與提醒</button>
+    <button data-tab="trade">交易與計畫</button>
+    <button data-tab="research">研究卡</button>
+    <button data-tab="lab">選股研究</button>
+    <button data-tab="paper">模擬帳戶</button>
+    <button data-tab="settings">設定與排程</button>
+  </nav>
+  <div id="envbar"></div>
+</header>
+<main>
+
+<section class="tab on" id="tab-overview">
+  <div class="kpis" id="kpis"></div>
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:12px"><h2 style="margin:0">持股狀態</h2>
+      <span class="hint" id="ov-time" style="margin:0"></span>
+      <button class="b" style="margin-left:auto" onclick="loadOverview(true)">重新整理</button></div>
+    <div class="scroll" style="margin-top:10px"><table id="ov-table"></table></div>
+    <p class="hint">依你在 portfolio.json 設定的規則判斷；這裡只看狀態，不會推送，也不影響每天 14:30 的提醒紀錄。</p>
+    <div id="ov-extra"></div>
+  </div>
+</section>
+
+<section class="tab" id="tab-brief">
+  <div class="row">
+    <div class="card">
+      <h2>盤前簡報</h2>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="mb-force"> 週末也產生</label>
+        <label class="check"><input type="checkbox" id="mb-nonarr"> 不用 AI 摘要</label>
+      </div>
+      <div class="btns">
+        <button class="b primary" onclick="runJob('morning_brief', {force: ck('mb-force'), no_narrate: ck('mb-nonarr')}, 'mb-out')">預覽</button>
+        <button class="b" onclick="runJob('morning_brief', {send: true, force: ck('mb-force'), no_narrate: ck('mb-nonarr')}, 'mb-out', '把盤前簡報推送到 Discord？')">推送到 Discord</button>
+      </div>
+      <p class="hint">排程：平日 08:30 自動推送。產生一次約需 1～3 分鐘。</p>
+      <div id="mb-out"></div>
+    </div>
+    <div class="card">
+      <h2>持股提醒</h2>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="ca-force" checked> 已檢查過也重新判斷</label>
+        <label class="check"><input type="checkbox" id="ca-test"> 沒有提醒也輸出狀態摘要</label>
+        <label class="check"><input type="checkbox" id="ca-nonarr"> 不用 AI 摘要</label>
+      </div>
+      <div class="btns">
+        <button class="b primary" onclick="runJob('check_alerts', {force: ck('ca-force'), test: ck('ca-test'), no_narrate: ck('ca-nonarr')}, 'ca-out')">預覽</button>
+        <button class="b" onclick="runJob('check_alerts', {send: true, force: ck('ca-force'), test: ck('ca-test'), no_narrate: ck('ca-nonarr')}, 'ca-out', '把持股提醒推送到 Discord？')">推送到 Discord</button>
+      </div>
+      <p class="hint">排程：平日 14:30 自動檢查，有觸發才推送。注意：預覽也會記錄「今天已檢查」，之後排程同一天不會重複通知。</p>
+      <div id="ca-out"></div>
+    </div>
+  </div>
+</section>
+
+<section class="tab" id="tab-trade">
+  <div class="row">
+    <div class="card">
+      <h2>記錄買賣</h2>
+      <div class="grid">
+        <div><label>買賣</label><select id="rt-side"><option value="buy">買進</option><option value="sell">賣出</option></select></div>
+        <div><label>代號</label><input id="rt-symbol" placeholder="0050、2330、VOO"></div>
+        <div><label>股數（可零股／碎股）</label><input id="rt-qty" inputmode="decimal"></div>
+        <div><label>成交價（美股為美元）</label><input id="rt-price" inputmode="decimal"></div>
+        <div><label>成交日（空白 = 今天）</label><input id="rt-date" type="date"></div>
+        <div><label>名稱（新持股才需要）</label><input id="rt-name"></div>
+      </div>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="rt-etf"> 美股 ETF</label>
+        <label class="check"><input type="checkbox" id="rt-noplan"> 個股不套用計畫（不建議）</label>
+      </div>
+      <div class="btns"><button class="b primary" onclick="recordTrade()">記錄</button></div>
+      <p class="hint">股數與成交均價會自動更新；個股買進會套用交易計畫，超出可買股數或風險預算會警告。</p>
+      <div id="rt-out"></div>
+    </div>
+    <div class="card">
+      <h2>個股交易計畫（買前）</h2>
+      <div class="grid">
+        <div><label>代號</label><input id="pn-symbol" placeholder="2317"></div>
+        <div><label>停損價</label><input id="pn-stop" inputmode="decimal"></div>
+        <div><label>預計買價（空白 = 最近收盤）</label><input id="pn-entry" inputmode="decimal"></div>
+        <div><label>停利價（選填）</label><input id="pn-target" inputmode="decimal"></div>
+      </div>
+      <label>買進理由</label><input id="pn-thesis" maxlength="200" placeholder="例：AI 伺服器出貨成長">
+      <label>失效條件（每行一個）</label>
+      <textarea id="pn-invalid" rows="3" placeholder="below_ma:60&#10;revenue_yoy_below:0:2&#10;time_stop:60:0.05"></textarea>
+      <p class="hint">close_below:價格、below_ma:天數、time_stop:天數:最低報酬、revenue_yoy_below:年增率%:連續月數</p>
+      <div class="btns">
+        <button class="b primary" onclick="newPlan()">建立計畫並計算可買股數</button>
+        <button class="b" onclick="runJob('plan_list', {all: false}, 'pn-out')">列出計畫</button>
+      </div>
+      <div id="pn-out"></div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="card">
+      <h2>確認持股理由／取消計畫</h2>
+      <div class="grid">
+        <div><label>持股代號</label><input id="pr-symbol"></div>
+        <div><label>計畫 ID</label><input id="pc-id"></div>
+      </div>
+      <div class="btns">
+        <button class="b" onclick="runJob('plan_review', {symbol: val('pr-symbol')}, 'pr-out', '確認 ' + val('pr-symbol') + ' 的持股理由仍成立？')">理由仍成立</button>
+        <button class="b danger" onclick="runJob('plan_cancel', {plan_id: val('pc-id')}, 'pr-out', '取消計畫 ' + val('pc-id') + '？')">取消待執行計畫</button>
+      </div>
+      <div id="pr-out"></div>
+    </div>
+    <div class="card">
+      <h2>交易檢討</h2>
+      <div class="grid"><div><label>月份</label><input id="rv-month" type="month"></div></div>
+      <div class="checks"><label class="check"><input type="checkbox" id="rv-all"> 統計全部紀錄</label></div>
+      <div class="btns">
+        <button class="b primary" onclick="runJob('review_trades', {month: val('rv-month'), all: ck('rv-all')}, 'rv-out')">產生</button>
+        <button class="b" onclick="runJob('review_trades', {month: val('rv-month'), all: ck('rv-all'), send: true}, 'rv-out', '把交易檢討推送到 Discord？')">推送到 Discord</button>
+      </div>
+      <div id="rv-out"></div>
+    </div>
+  </div>
+</section>
+
+<section class="tab" id="tab-research">
+  <div class="card">
+    <h2>個股研究卡</h2>
+    <div class="grid" style="grid-template-columns: 1fr"><div><label>股票代號（空白或逗號分隔，最多 10 個；目前只支援上市公司）</label><input id="rc-codes" placeholder="2330 2317"></div></div>
+    <div class="btns">
+      <button class="b primary" onclick="runJob('research_card', {codes: val('rc-codes')}, 'rc-out')">產生</button>
+      <button class="b" onclick="runJob('research_card', {watchlist: true}, 'rc-out')">觀察清單＋持有個股</button>
+      <button class="b" onclick="runJob('research_card', {codes: val('rc-codes'), send: true}, 'rc-out', '產生並推送到 Discord？')">產生並推送</button>
+    </div>
+    <p class="hint">只陳述數據、不給買賣結論。第一次查一檔約需 2 分鐘回補歷史，之後讀快取。選股研究正在下載資料時會暫停使用，避免被證交所封鎖。</p>
+    <div id="rc-out"></div>
+  </div>
+  <div class="card">
+    <h2>觀察清單</h2>
+    <p class="hint" style="margin-top:0">公布新月營收時，每日提醒會通知你。</p>
+    <div class="chips" id="wl-chips"></div>
+    <div class="btns"><input id="wl-add" placeholder="輸入代號後按新增" style="max-width:220px"><button class="b" onclick="addWatch()">新增</button></div>
+  </div>
+</section>
+
+<section class="tab" id="tab-lab">
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><h2 style="margin:0">族群雷達</h2>
+      <span class="hint" id="rd-time" style="margin:0"></span>
+      <span style="margin-left:auto" class="btns"><button class="b" style="margin:0" onclick="runJob('sector_radar', {}, 'rd-out')">重新計算</button></span></div>
+    <p class="hint">記憶體、面板、IC 設計等族群（依櫃買中心產業價值鏈分類），依「營收年增、近 60 日漲跌、量能、融資增減」四項的跨族群排名平均排序；數字為族群成分股的中位數或比例。排名是資料整理，不是買賣建議。</p>
+    <div id="rd-bt"></div>
+    <div class="scroll"><table id="rd-table"></table></div>
+    <div id="rd-out"></div>
+  </div>
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><h2 style="margin:0">前瞻測試：營收動能・營收年增最高 20 檔</h2>
+      <span class="hint" id="fw-time" style="margin:0"></span>
+      <span style="margin-left:auto" class="btns" ><button class="b" style="margin:0" onclick="runJob('forward_test', {}, 'fw-out')">立即記錄並評估</button></span></div>
+    <p class="hint">每個交易日收盤後記下符合規則的名單（只新增、不修改），之後用真實的 5 天、20 天後股價，扣一次來回成本，與同期 0050 比較。這是驗證規則用的紀錄，不是買賣建議；到期筆數少時，結果主要是運氣。</p>
+    <div id="fw-summary"></div>
+    <details style="margin-top:10px"><summary class="hint" id="fw-picks-title">最新名單</summary><div class="scroll"><table id="fw-picks"></table></div></details>
+    <div id="fw-out"></div>
+  </div>
+  <div class="card">
+    <h2>研究進度</h2>
+    <div id="lab-progress"><p class="hint">讀取中…</p></div>
+  </div>
+  <div class="row">
+    <div class="card" style="flex: 0 1 320px">
+      <h2>報告</h2>
+      <div class="list" id="rep-list"></div>
+      <h2 style="margin-top:20px">重新執行</h2>
+      <label>研究</label>
+      <select id="lab-script"><option value="shortterm">短期預測＋哪一類比較會漲</option><option value="strategy">三類選股規則</option></select>
+      <label>範圍</label>
+      <select id="lab-universe">
+        <option value="electronics">上市＋上櫃電子（含下市）</option>
+        <option value="electronics-twse">只看上市電子</option>
+        <option value="electronics-tpex">只看上櫃電子</option>
+        <option value="tw50-pit">臺灣50當時成分股</option>
+      </select>
+      <div class="btns"><button class="b" onclick="runJob('lab', {script: val('lab-script'), universe: val('lab-universe')}, 'lab-out', '開始執行選股研究？資料已快取時幾分鐘，否則需數小時。')">執行</button></div>
+      <div id="lab-out"></div>
+    </div>
+    <div class="card"><div class="md" id="rep-view"><p class="hint">選擇左邊的報告。</p></div></div>
+  </div>
+</section>
+
+<section class="tab" id="tab-paper">
+  <div class="card" id="pp-status-card">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">模擬帳戶：營收動能</h2>
+      <span id="pp-state"></span>
+      <span class="hint" id="pp-time" style="margin:0"></span>
+      <span style="margin-left:auto" class="btns">
+        <button class="b" style="margin:0" onclick="runJob('paper_bot', {}, 'pp-out')">立即執行今天的流程</button>
+        <button class="b" style="margin:0" id="pp-pause" onclick="togglePause()"></button>
+      </span>
+    </div>
+    <p class="hint" id="pp-rules"></p>
+    <div id="pp-out"></div>
+  </div>
+  <div class="kpis" id="pp-kpis"></div>
+  <div class="card"><div class="md" id="pp-scorecard"><p class="hint">還沒有成績單。每個月第一個交易日收盤後自動產生。</p></div></div>
+  <div class="card">
+    <h2>淨值走勢（同樣起始資金放 0050 比較）</h2>
+    <div id="pp-chart"></div>
+  </div>
+  <div class="row">
+    <div class="card"><h2>下一個交易日 09:30 要執行</h2><div class="scroll"><table id="pp-pending"></table></div></div>
+    <div class="card"><h2>目前持股</h2><div class="scroll"><table id="pp-positions"></table></div></div>
+  </div>
+  <div class="card"><h2>交易紀錄</h2><div class="scroll" style="max-height:420px;overflow-y:auto"><table id="pp-trades"></table></div></div>
+  <div class="card"><h2>歷史模擬（2018 年中至今，同一套規則與成本）</h2><div id="pp-backtest"></div></div>
+</section>
+
+<section class="tab" id="tab-settings">
+  <div class="row">
+    <div class="card">
+      <h2>排程</h2>
+      <div class="scroll"><table id="st-tasks"></table></div>
+      <p class="hint">排程由 scripts\register_tasks.ps1 建立；停用請執行該腳本加 -Disable。</p>
+      <h2 style="margin-top:18px">最近排程輸出</h2>
+      <label>盤前簡報 logs\morning_brief.log</label><div class="md"><pre id="st-log-mb"></pre></div>
+      <label>持股提醒 logs\check_alerts.log</label><div class="md"><pre id="st-log-ca"></pre></div>
+    </div>
+    <div class="card">
+      <h2>portfolio.json</h2>
+      <p class="hint" style="margin-top:0">持股、提醒規則、風險設定、觀察清單。儲存前會檢查格式與規則，舊版自動備份到 state\portfolio_backups\。欄位說明見 src\app\alerts\portfolio.py。</p>
+      <textarea id="pf-text" rows="24" spellcheck="false"></textarea>
+      <div class="btns"><button class="b primary" onclick="savePortfolio()">儲存</button><button class="b" onclick="loadPortfolio()">還原為目前檔案</button></div>
+      <div id="pf-msg" class="hint"></div>
+    </div>
+  </div>
+</section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const val = id => $(id).value.trim();
+const ck = id => $(id).checked;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (v, d = 2) => v == null || isNaN(v) ? '—' : Number(v).toLocaleString('zh-TW', {minimumFractionDigits: d, maximumFractionDigits: d});
+const pct = (v, d = 1) => v == null || isNaN(v) ? '—' : (v > 0 ? '+' : '') + (v * 100).toFixed(d) + '%';
+const cls = v => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 5000); }
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...opts});
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || res.statusText);
+  return body;
+}
+
+// ---------- 分頁 ----------
+const loaders = {overview: () => loadOverview(), lab: () => { loadRadar(); loadForward(); loadReports(); loadProgress(); }, settings: () => { loadStatus(); loadPortfolio(); }, paper: () => loadPaper(), research: () => loadWatch()};
+$('nav').addEventListener('click', e => {
+  const tab = e.target.dataset.tab; if (!tab) return;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + tab));
+  try { localStorage.setItem('tab', tab); } catch (_) {}
+  loaders[tab]?.();
+});
+
+// ---------- Markdown（報告與 Discord 訊息用到的語法） ----------
+function inline(s) {
+  return esc(s)
+    .replace(/\[([^\]]+)\]\(&lt;([^)]+?)&gt;\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[\s（(])_([^_]+)_(?=$|[\s）),.。])/g, '$1<em>$2</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+function md(text) {
+  const lines = text.replace(/\r/g, '').split('\n'); const out = []; let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^\s*\|/.test(l) && i + 1 < lines.length && /^\s*\|[\s\-:|]+\|\s*$/.test(lines[i + 1])) {
+      const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      let h = '<div class="scroll"><table><tr>' + cells(l).map(c => `<th>${inline(c)}</th>`).join('') + '</tr>'; i += 2;
+      while (i < lines.length && /^\s*\|/.test(lines[i])) { h += '<tr>' + cells(lines[i]).map(c => `<td>${inline(c)}</td>`).join('') + '</tr>'; i++; }
+      out.push(h + '</table></div>'); continue;
+    }
+    if (/^```/.test(l)) { let b = []; i++; while (i < lines.length && !/^```/.test(lines[i])) b.push(lines[i++]); i++; out.push('<pre>' + esc(b.join('\n')) + '</pre>'); continue; }
+    if (/^\s*[-*] /.test(l)) { let b = []; while (i < lines.length && /^\s*[-*] /.test(lines[i])) b.push('<li>' + inline(lines[i++].replace(/^\s*[-*] /, '')) + '</li>'); out.push('<ul>' + b.join('') + '</ul>'); continue; }
+    if (/^\s*\d+\. /.test(l)) { let b = []; while (i < lines.length && /^\s*\d+\. /.test(lines[i])) b.push('<li>' + inline(lines[i++].replace(/^\s*\d+\. /, '')) + '</li>'); out.push('<ol>' + b.join('') + '</ol>'); continue; }
+    let m;
+    if ((m = l.match(/^(#{1,4}) (.*)/))) out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`);
+    else if (/^> /.test(l)) out.push('<blockquote>' + inline(l.slice(2)) + '</blockquote>');
+    else if (/^\[[a-z\-]+\]/.test(l)) out.push('<p class="log">' + esc(l) + '</p>');
+    else if (l.trim()) out.push('<p>' + inline(l) + '</p>');
+    i++;
+  }
+  return out.join('\n');
+}
+
+// ---------- 背景工作 ----------
+async function runJob(kind, params, outId, confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  const out = $(outId);
+  let job;
+  try { job = await api('/api/jobs', {method: 'POST', body: JSON.stringify({kind, params})}); }
+  catch (e) { out.innerHTML = `<div class="out err">${esc(e.message)}</div>`; return; }
+  pollJob(job.id, out);
+  return job;
+}
+async function pollJob(id, out) {
+  const t0 = Date.now();
+  for (;;) {
+    let j; try { j = await api('/api/jobs/' + id); } catch (e) { out.innerHTML = `<div class="out err">${esc(e.message)}</div>`; return; }
+    const secs = Math.round(((j.ended ? j.ended * 1000 : Date.now()) - j.started * 1000) / 1000);
+    const state = j.status === 'running' ? `<span class="tag warn">執行中 ${secs} 秒</span> <button class="b" onclick="api('/api/jobs/${id}/stop',{method:'POST'})">停止</button>`
+      : j.status === 'done' ? `<span class="tag ok">完成</span> ${secs} 秒` : `<span class="tag bad">失敗（代碼 ${j.exit_code}）</span>`;
+    out.innerHTML = `<div class="out"><div class="meta"><strong>${esc(j.title)}</strong>${state}</div><div class="md">${md(j.output || '')}</div></div>`;
+    if (j.status !== 'running') { if (['record_trade','plan_new','plan_review','plan_cancel'].includes(j.kind)) loadOverview(true); if (j.kind === 'forward_test') loadForward(); if (j.kind === 'paper_bot') loadPaper(); if (j.kind === 'sector_radar') { loadRadar(); loadReports(); } return; }
+    await new Promise(r => setTimeout(r, Date.now() - t0 > 60000 ? 3000 : 1200));
+  }
+}
+
+function recordTrade() {
+  const side = val('rt-side'), sym = val('rt-symbol').toUpperCase();
+  const p = {side, symbol: sym, qty: val('rt-qty'), price: val('rt-price'), date: val('rt-date'), name: val('rt-name'), etf: ck('rt-etf'), no_plan: ck('rt-noplan')};
+  runJob('record_trade', p, 'rt-out', `記錄${side === 'buy' ? '買進' : '賣出'} ${sym} ${p.qty} 股，成交價 ${p.price}？`);
+}
+function newPlan() {
+  const p = {symbol: val('pn-symbol'), stop: val('pn-stop'), entry: val('pn-entry'), target: val('pn-target'), thesis: val('pn-thesis'),
+             invalid: $('pn-invalid').value.split('\n').map(s => s.trim()).filter(Boolean)};
+  runJob('plan_new', p, 'pn-out');
+}
+
+// ---------- 總覽 ----------
+const KIND = {OK: ['正常', 'ok'], NEAR_STOP: ['接近停損', 'warn'], NEAR_TARGET: ['接近停利', 'warn'], STOP_LOSS: ['觸發停損', 'bad'],
+              TRAILING_STOP: ['觸發移動停損', 'bad'], TAKE_PROFIT: ['觸發停利', 'bad'], PLAN_INVALID: ['計畫失效', 'bad']};
+async function loadOverview(refresh = false) {
+  $('ov-time').textContent = '讀取最新收盤價中…';
+  let d; try { d = await api('/api/overview' + (refresh ? '?refresh=1' : '')); }
+  catch (e) { $('ov-table').innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; $('ov-time').textContent = ''; return; }
+  const ev = d.evaluations || [], fx = d.fx;
+  let total = 0, cost = 0, missingFx = false;
+  const rows = ev.map(e => {
+    const rate = e.is_us ? fx : 1; if (e.is_us && !fx) missingFx = true;
+    const value = e.shares * e.close * (rate || 0), pnl = (e.close - e.cost) * e.shares * (rate || 0);
+    total += value; cost += e.cost * e.shares * (rate || 0);
+    const dist = e.stop_level ? 1 - e.stop_level / e.close : null;   // 再跌多少會觸及停損（與盤前簡報相同）
+    const [kt, kc] = KIND[e.kind] || [e.kind, 'warn'];
+    return `<tr><td><strong>${esc(e.symbol)}</strong> ${esc(e.label.replace(e.symbol, '').trim())}</td><td><span class="tag ${kc}">${kt}</span></td>
+      <td class="num">${fmt(e.close)} <small class="hint">${e.date.slice(5)}</small></td><td class="num">${fmt(e.shares, e.shares % 1 ? 4 : 0)}</td>
+      <td class="num">${fmt(e.cost)}</td><td class="num ${cls(e.unrealized_pct)}">${pct(e.unrealized_pct)}</td>
+      <td class="num ${cls(pnl)}">${rate ? fmt(pnl, 0) : '—'}</td><td class="num">${rate ? fmt(value, 0) : '—'}</td>
+      <td class="num">${e.stop_level ? fmt(e.stop_level) : '未設'}</td><td class="num">${dist == null ? '—' : (dist * 100).toFixed(1) + '%'}</td>
+      <td class="num">${e.target_level ? fmt(e.target_level) : '—'}</td></tr>`;
+  });
+  $('ov-table').innerHTML = `<tr><th>持股</th><th>狀態</th><th class="num">收盤</th><th class="num">股數</th><th class="num">成本</th><th class="num">未實現</th>
+    <th class="num">損益（台幣）</th><th class="num">市值（台幣）</th><th class="num">停損價</th><th class="num">再跌多少觸及停損</th><th class="num">停利價</th></tr>` + rows.join('');
+  const alerts = ev.filter(e => e.kind !== 'OK').length;
+  $('kpis').innerHTML = [
+    ['總市值（台幣）', fmt(total, 0)], ['未實現損益', `<span class="${cls(total - cost)}">${fmt(total - cost, 0)}（${pct(cost ? total / cost - 1 : null)}）</span>`],
+    ['需要注意', alerts ? `<span class="neg">${alerts} 檔</span>` : '<span class="pos">沒有</span>'], ['美元匯率', fx ? fmt(fx, 3) : '—']
+  ].map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  const extra = [];
+  if (d.allocation) extra.push('<h2 style="margin-top:16px">配置</h2>' + Object.entries(d.allocation.weights).map(([g, w]) =>
+    `${esc(g)} ${pct(w)}（目標 ${pct(d.allocation.targets[g], 0)}）`).join('、'));
+  if (d.risk) extra.push(`<h2 style="margin-top:16px">部位風險</h2>總曝險 ${fmt(d.risk.open_risk, 0)}（資金的 ${pct(d.risk.open_risk_pct)}，上限 ${pct(d.risk.max_total_risk)}）` +
+    (d.risk.oversized.length ? `；<span class="neg">超過單一持股上限：${d.risk.oversized.map(p => esc(p.label)).join('、')}</span>` : ''));
+  if (missingFx) extra.push('<p class="err">美元匯率取得失敗，美股市值未計入。</p>');
+  if (d.errors?.length) extra.push('<p class="err">' + d.errors.map(esc).join('<br>') + '</p>');
+  $('ov-extra').innerHTML = extra.join('');
+  $('ov-time').textContent = '更新於 ' + (d.run_at || '').replace('T', ' ');
+}
+
+// ---------- 觀察清單 ----------
+async function loadWatch() {
+  try { const d = await api('/api/portfolio'); renderWatch(JSON.parse(d.text).watchlist || []); } catch (e) { $('wl-chips').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+function renderWatch(list) {
+  $('wl-chips').innerHTML = list.length ? list.map(c => `<span class="chip">${esc(c)}<button title="移除" onclick="removeWatch('${esc(c)}')">×</button></span>`).join('') : '<span class="hint">還沒有觀察的股票</span>';
+  $('wl-chips').dataset.list = JSON.stringify(list);
+}
+async function saveWatch(list) {
+  try { const d = await api('/api/watchlist', {method: 'PUT', body: JSON.stringify({codes: list})}); renderWatch(d.watchlist); toast('觀察清單已儲存'); }
+  catch (e) { toast(e.message); }
+}
+function addWatch() { const c = val('wl-add'); if (!c) return; const l = JSON.parse($('wl-chips').dataset.list || '[]'); saveWatch([...l, ...c.split(/[\s,，]+/)]); $('wl-add').value = ''; }
+function removeWatch(c) { saveWatch(JSON.parse($('wl-chips').dataset.list || '[]').filter(x => x !== c)); }
+
+// ---------- 模擬帳戶 ----------
+let paperPaused = false;
+const plain = v => `${+(v * 100).toFixed(2)}%`;      // 不帶正負號的百分比（設定值用）
+const SIDE = {buy: ['買進', 'ok'], sell: ['賣出', 'bad'], dividend: ['除權息入帳', 'warn'], reduction: ['減資換股', 'warn']};
+function lineChart(points, series) {
+  // points: [{date, ...}]；series: [{key, label, color}]
+  if (points.length < 2) return '<p class="hint">累積兩個交易日以上的紀錄後才會畫出走勢；目前只有起始日。</p>';
+  const W = 900, H = 260, P = {l: 56, r: 12, t: 12, b: 28};
+  const vals = points.flatMap(p => series.map(s => p[s.key]).filter(v => v != null));
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || hi * 0.02; lo -= pad; hi += pad;
+  const x = i => P.l + i * (W - P.l - P.r) / (points.length - 1), y = v => P.t + (hi - v) * (H - P.t - P.b) / (hi - lo);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => lo + (hi - lo) * f);
+  const xt = [0, Math.floor((points.length - 1) / 2), points.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="淨值走勢">
+    ${ticks.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${P.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${Math.round(v).toLocaleString()}</text>`).join('')}
+    ${xt.map(i => `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">${points[i].date.slice(5)}</text>`).join('')}
+    ${series.map(s => `<polyline fill="none" stroke="${s.color}" stroke-width="2" points="${points.map((p, i) => p[s.key] == null ? '' : `${x(i)},${y(p[s.key])}`).join(' ')}"/>`).join('')}
+  </svg><div class="hint" style="display:flex;gap:16px">${series.map(s => `<span><span style="display:inline-block;width:14px;height:3px;background:${s.color};vertical-align:middle"></span> ${s.label}</span>`).join('')}</div>`;
+}
+async function loadPaper() {
+  let d; try { d = await api('/api/paper'); } catch (e) { $('pp-rules').innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+  paperPaused = d.paused;
+  $('pp-state').innerHTML = d.paused ? '<span class="tag warn">已暫停</span>' : '<span class="tag ok">運作中（平日 09:30 成交、16:50 收盤記帳與排單）</span>';
+  $('pp-pause').textContent = d.paused ? '恢復模擬帳戶' : '暫停模擬帳戶';
+  if (!d.exists) { $('pp-rules').textContent = '還沒有模擬帳戶。按「立即執行今天的流程」建立。'; return; }
+  const v = d.view, s = v.summary, c = v.config;
+  if (d.scorecard) $('pp-scorecard').innerHTML = md(d.scorecard);
+  $('pp-time').textContent = `資料至 ${v.last_date} 收盤，更新於 ${v.updated.replace('T', ' ').slice(0, 16)}`;
+  $('pp-rules').textContent = `自 ${v.start} 起，起始資金 ${fmt(v.capital, 0)} 元。規則：上市＋上櫃電子股中最近 2 個月營收都年增、站上 120 日線者，依營收年增率由高到低買進；`
+    + `每筆最多虧 ${plain(c.max_risk_per_trade)}、單一個股 ≤ ${plain(c.max_position_pct)}、總風險 ≤ ${plain(c.max_total_risk)}、停損設在買價下方 ${plain(c.stop_pct)}；`
+    + (c.breakeven_after ? `收盤漲到成本 +${plain(c.breakeven_after)} 後，停損上移到成本價（保本）；` : '')
+    + (c.max_per_theme ? `同一族群（記憶體、PCB…）最多同時持有 ${c.max_per_theme} 檔；` : '')
+    + `跌破停損、跌破 120 日線或營收連 2 月年減就賣。隔天 09:30 以即時報價成交（買用最佳賣價、賣用最佳買價；沒執行到則以開盤價），手續費 ${+(c.fee_discount * 10).toFixed(2)} 折（最低 ${c.min_fee} 元）。這是模擬，不是買賣建議。`
+    + (d.paused ? `　暫停資訊：${d.paused_info}` : '');
+  const value = v.positions.reduce((a, p) => a + p.shares * (p.last || p.entry), 0);
+  $('pp-kpis').innerHTML = [
+    ['淨值', fmt(s.equity, 0)],
+    ['報酬', `<span class="${cls(s.total_return)}">${pct(s.total_return)}</span>`],
+    ['同期 0050', `<span class="${cls(s.bench_total_return)}">${pct(s.bench_total_return)}</span>`],
+    ['現金／持股市值', `${fmt(v.cash, 0)}／${fmt(value, 0)}`],
+    ['完成交易', s.closed_trades ? `${s.closed_trades} 筆，勝率 ${Math.round(s.win_rate * 100)}%` : '尚無'],
+  ].map(([l, x]) => `<div class="kpi"><div class="v">${x}</div><div class="l">${l}</div></div>`).join('');
+  $('pp-chart').innerHTML = lineChart(v.curve, [{key: 'equity', label: '模擬帳戶', color: 'var(--accent)'}, {key: 'bench', label: '0050（同樣起始資金）', color: 'var(--muted)'}]);
+  const name = x => `${esc(x.code)} ${esc(x.name || '')}`;
+  $('pp-pending').innerHTML = v.pending.length ? '<tr><th>動作</th><th>股票</th><th class="num">股數</th><th class="num">參考收盤</th><th class="num">停損約</th><th>理由</th></tr>' +
+    v.pending.map(o => `<tr><td><span class="tag ${SIDE[o.side][1]}">${SIDE[o.side][0]}</span></td><td>${name(o)}</td><td class="num">${o.shares}</td>
+      <td class="num">${fmt(o.ref_price)}</td><td class="num">${o.stop_est ? fmt(o.stop_est) : '—'}</td><td style="white-space:normal">${esc(o.reason)}</td></tr>`).join('')
+    : '<tr><td class="hint">沒有待執行的單</td></tr>';
+  $('pp-positions').innerHTML = v.positions.length ? '<tr><th>股票</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">報酬</th><th class="num">停損</th><th>買進日</th></tr>' +
+    v.positions.map(p => { const last = p.last || p.entry, stale = p.last_date && (new Date(v.last_date) - new Date(p.last_date)) / 864e5 >= 5;
+      return `<tr><td>${name(p)}${stale ? ' <span class="tag bad">多日無成交價</span>' : ''}</td><td class="num">${p.shares}</td><td class="num">${fmt(p.entry)}</td><td class="num">${fmt(last)}</td>
+      <td class="num ${cls(last / p.entry - 1)}">${pct(last / p.entry - 1)}</td><td class="num">${fmt(p.stop)}</td><td>${esc(p.entry_date)}</td></tr>`; }).join('')
+    : '<tr><td class="hint">目前沒有持股</td></tr>';
+  $('pp-trades').innerHTML = v.trades.length ? '<tr><th>日期</th><th>動作</th><th>股票</th><th class="num">股數</th><th class="num">價格</th><th class="num">金額</th><th class="num">費用</th><th class="num">損益</th><th>說明</th></tr>' +
+    v.trades.map(t => `<tr><td>${esc(t.date)}</td><td><span class="tag ${(SIDE[t.side] || ['', 'warn'])[1]}">${(SIDE[t.side] || [t.side])[0]}</span></td><td>${name(t)}</td>
+      <td class="num">${t.shares ?? ''}</td><td class="num">${t.price ? fmt(t.price) : ''}</td><td class="num">${t.amount != null ? fmt(t.amount, 0) : ''}</td>
+      <td class="num">${t.fees != null ? fmt(t.fees, 0) : ''}</td><td class="num ${cls(t.pnl)}">${t.pnl != null ? fmt(t.pnl, 0) + `（${pct(t.return)}）` : ''}</td>
+      <td style="white-space:normal">${esc(t.reason || (t.from_shares ? `${t.from_shares} 股換成 ${t.shares} 股` : ''))}</td></tr>`).join('')
+    : '<tr><td class="hint">還沒有成交。第一筆模擬單會在下一個交易日 09:30 成交。</td></tr>';
+  const b = d.backtest && d.backtest.summary, L = d.luck && d.luck.runs;
+  let h = '';
+  if (b) h += `<p>單次模擬：年化 ${pct(b.cagr)}（0050 ${pct(b.bench_cagr)}），最大回撤 ${pct(b.max_drawdown)}（0050 ${pct(b.bench_max_drawdown)}），`
+    + `${b.closed_trades} 筆交易、勝率 ${Math.round(b.win_rate * 100)}%，平均每筆 ${pct(b.avg_return)}（賺 ${pct(b.avg_win)}／賠 ${pct(b.avg_loss)}），平均持有 ${Math.round(b.avg_hold_days)} 天。</p>`;
+  if (L) {
+    const g = L.map(r => r['差距']).sort((a, b) => a - b), cg = L.map(r => r['年化']).sort((a, b) => a - b), mid = a => (a[3] + a[4]) / 2;
+    h += `<p><strong>運氣的範圍</strong>（${esc(d.luck.note)}）：年化 ${pct(cg[0])} ～ ${pct(cg[cg.length - 1])}、中位數 ${pct(mid(cg))}；`
+      + `與 0050 的差距 ${pct(g[0])} ～ ${pct(g[g.length - 1])}、中位數 ${pct(mid(g))}；${L.filter(r => r['差距'] > 0).length}／${L.length} 次贏過 0050；`
+      + `最大回撤每次都約 ${pct(L[0]['最大回撤'])}。</p><p class="hint">只持有 3～4 檔，進出時點稍有不同結果就差很多；可以確定的是約 -46% 的回撤，以及「多半小贏、但贏多少看運氣」。`
+      + `完整報告見「選股研究」分頁的 ${esc((d.backtest && d.backtest.report) || 'paper_bot_backtest')}。</p>`;
+  }
+  $('pp-backtest').innerHTML = h || '<p class="hint">還沒有歷史模擬。</p>';
+}
+async function togglePause() {
+  const to = !paperPaused;
+  if (!confirm(to ? '暫停模擬帳戶？暫停期間每天 16:50 不交易、不推送；之後恢復時會補跑暫停期間的交易日。' : '恢復模擬帳戶？')) return;
+  try { await api('/api/paper/pause', {method: 'POST', body: JSON.stringify({paused: to})}); toast(to ? '已暫停' : '已恢復'); } catch (e) { toast(e.message); }
+  loadPaper();
+}
+
+// ---------- 族群雷達 ----------
+async function loadRadar() {
+  let d; try { d = await api('/api/radar'); } catch (e) { $('rd-table').innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; return; }
+  if (!d.exists) { $('rd-table').innerHTML = '<tr><td class="hint">還沒有資料。按「重新計算」產生。</td></tr>'; return; }
+  $('rd-time').textContent = `${d.date} 收盤，更新於 ${d.updated.replace('T', ' ').slice(0, 16)}`;
+  const bt = d.backtest && d.backtest['20'];
+  $('rd-bt').innerHTML = bt ? `<p class="hint">歷史驗證（${bt.periods} 期，每 20 天換一次）：前 3 名族群每期平均比 0050 <strong class="${cls(bt.top_vs_bench)}">${pct(bt.top_vs_bench, 2)}</strong>（t 值 ${bt.top_vs_bench_t.toFixed(2)}，贏的期數 ${Math.round(bt.top_beats_bench * 100)}%）；
+     比後 3 名 ${pct(bt.top_vs_bottom, 2)}（t 值 ${bt.top_vs_bottom_t.toFixed(2)}）。t 值絕對值大於 2 才算有統計意義。完整報告見下方「${esc(d.backtest.report)}」。</p>` : '';
+  radarData = d;
+  $('rd-table').innerHTML = `<tr><th></th><th>排名</th><th>族群</th><th class="num">檔數</th><th class="num">分數</th><th class="num">營收年增</th><th class="num">連 2 月年增</th>
+    <th class="num">近 20 日</th><th class="num">近 60 日</th><th class="num">站上 120 日線</th><th class="num">量能比</th><th class="num">外資買超</th><th class="num">融資變化</th></tr>` +
+    d.rows.map((r, i) => `<tr class="rd-row" data-i="${i}" onclick="toggleTheme(${i})" title="點擊展開成分股">
+      <td><span class="arrow" id="rd-arrow-${i}">▶</span></td><td>${r.rank}</td><td><strong>${esc(r.theme)}</strong></td><td class="num">${r.members}</td><td class="num" ${heat(r.score)}>${fmt(r.score, 2)}</td>
+      <td class="num ${cls(r.rev_yoy)}">${fmt(r.rev_yoy, 1)}%</td><td class="num">${Math.round(r.rev_breadth * 100)}%</td>
+      <td class="num ${cls(r.r20)}">${pct(r.r20)}</td><td class="num ${cls(r.r60)}">${pct(r.r60)}</td><td class="num">${Math.round(r.above_ma * 100)}%</td>
+      <td class="num">${fmt(r.vratio, 2)}</td><td class="num ${cls(r.foreign20)}">${fmt(r.foreign20, 2)}</td><td class="num ${cls(r.margin20)}">${fmt(r.margin20, 2)}</td></tr>
+      <tr class="rd-detail" id="rd-detail-${i}" hidden><td colspan="13"></td></tr>`).join('');
+}
+let radarData = null;
+const heat = v => v == null ? '' : `style="background: color-mix(in srgb, var(--accent) ${Math.round(v * 35)}%, transparent)"`;
+const yes = v => v == null ? '—' : v >= 1 ? '<span class="pos">✓</span>' : '—';
+
+function toggleTheme(i) {
+  const row = $('rd-detail-' + i), open = row.hidden;
+  row.hidden = !open;
+  $('rd-arrow-' + i).textContent = open ? '▼' : '▶';
+  if (open && !row.dataset.done) { renderThemeStocks(i, false); row.dataset.done = '1'; }
+}
+function renderThemeStocks(i, onlyMomentum) {
+  const r = radarData.rows[i], cell = $('rd-detail-' + i).firstElementChild;
+  const list = (r.stocks || []).filter(s => !onlyMomentum || s.rev_momentum);
+  const n = (r.stocks || []).filter(s => s.rev_momentum).length;
+  cell.innerHTML = `<div class="rd-stocks">
+    <div class="checks" style="align-items:center;gap:14px"><label class="check" style="margin:0"><input type="checkbox" ${onlyMomentum ? 'checked' : ''}
+      onchange="renderThemeStocks(${i}, this.checked)"> 只看符合營收動能（${n} 檔）</label>
+      <span class="hint" style="margin:0">依個股分數排序（四項指標在全部電子股中的排名平均）。✓ 營收動能＝最近 2 個月營收都年增且站上 120 日線；★＝今天的前瞻測試名單。這是資料整理，不是買賣建議。</span></div>
+    <div class="scroll"><table><tr><th>標記</th><th>代號</th><th>名稱</th><th>市場</th><th class="num">收盤</th><th class="num">分數</th><th class="num">營收年增</th>
+      <th class="num">連 2 月年增</th><th class="num">近 20 日</th><th class="num">近 60 日</th><th class="num">站上 120 日線</th><th class="num">量能比</th>
+      <th class="num">外資買超</th><th class="num">融資變化</th><th></th></tr>` +
+    (list.length ? list.map(s => `<tr><td>${s.rev_momentum ? '<span class="tag ok">✓ 營收動能</span>' : ''}${s.forward ? ' <span class="tag warn">★ 前瞻</span>' : ''}</td>
+      <td>${esc(s.code)}</td><td>${esc(s.name)}</td><td>${esc(s.market)}</td><td class="num">${fmt(s.close)}</td><td class="num" ${heat(s.score)}>${fmt(s.score, 2)}</td>
+      <td class="num ${cls(s.rev_yoy)}">${s.rev_yoy == null ? '—' : fmt(s.rev_yoy, 1) + '%'}</td><td class="num">${yes(s.rev_breadth)}</td>
+      <td class="num ${cls(s.r20)}">${pct(s.r20)}</td><td class="num ${cls(s.r60)}">${pct(s.r60)}</td><td class="num">${yes(s.above_ma)}</td>
+      <td class="num">${fmt(s.vratio, 2)}</td><td class="num ${cls(s.foreign20)}">${fmt(s.foreign20, 2)}</td><td class="num ${cls(s.margin20)}">${fmt(s.margin20, 2)}</td>
+      <td>${s.market === '上市' ? `<button class="b mini" onclick="event.stopPropagation(); openCard('${esc(s.code)}')">研究卡</button>`
+        : '<button class="b mini" disabled title="研究卡目前只支援上市公司">研究卡</button>'}</td></tr>`).join('')
+      : '<tr><td colspan="15" class="hint">沒有符合條件的個股</td></tr>') + '</table></div></div>';
+}
+function openCard(code) {
+  document.querySelector('nav button[data-tab="research"]').click();
+  $('rc-codes').value = code;
+  runJob('research_card', {codes: code}, 'rc-out');
+}
+
+// ---------- 前瞻測試 ----------
+async function loadForward() {
+  let d; try { d = await api('/api/forward'); } catch (e) { $('fw-summary').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  if (!d.exists) { $('fw-summary').innerHTML = '<p class="hint">還沒有紀錄。按「立即記錄並評估」建立第一筆。</p>'; return; }
+  $('fw-time').textContent = `最新紀錄 ${d.signal_date}，更新於 ${d.updated.replace('T', ' ').slice(0, 16)}`;
+  const n = (d.evaluations || []).filter(e => e.horizon === 5).length;
+  $('fw-summary').innerHTML = `<div class="scroll"><table><tr><th>持有天數</th><th class="num">已到期</th><th class="num">等待中</th><th class="num">名單平均（扣成本）</th>
+    <th class="num">同期 0050</th><th class="num">平均贏 0050</th><th class="num">贏的比例</th><th class="num">t 值（不重疊）</th></tr>` +
+    d.summary.map(s => `<tr><td>${s.horizon} 天</td><td class="num">${s.matured}</td><td class="num">${s.pending}</td>
+      <td class="num ${cls(s.avg_ret)}">${pct(s.avg_ret, 2)}</td><td class="num">${pct(s.avg_bench, 2)}</td>
+      <td class="num ${cls(s.avg_excess)}">${pct(s.avg_excess, 2)}</td><td class="num">${s.win_rate == null ? '—' : Math.round(s.win_rate * 100) + '%'}</td>
+      <td class="num">${s.t == null ? '樣本不足' : s.t.toFixed(2)}</td></tr>`).join('') + `</table></div>
+    <p class="hint">共 ${n} 天的紀錄。t 值的絕對值大於 2 才算有統計意義；大約需要累積半年以上的 20 天到期紀錄。</p>`;
+  const L = d.latest;
+  $('fw-picks-title').textContent = `最新名單（${L.date}：符合條件 ${L.qualified} 檔／電子股 ${L.universe} 檔）`;
+  $('fw-picks').innerHTML = '<tr><th>代號</th><th>名稱</th><th>市場</th><th>產業</th><th class="num">營收年增</th><th class="num">前月年增</th><th class="num">收盤</th><th class="num">高於 120 日線</th></tr>' +
+    L.picks.map(p => `<tr><td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>${esc(p.market)}</td><td>${esc(p.industry)}</td>
+      <td class="num">${fmt(p.rev_yoy, 1)}%</td><td class="num">${fmt(p.rev_yoy_prev, 1)}%</td><td class="num">${fmt(p.close)}</td><td class="num">${pct(p.above_ma_pct)}</td></tr>`).join('');
+}
+
+// ---------- 選股研究 ----------
+const STAGE = {'行情': '每日行情', '產業名單與本益比': '產業名單與本益比', '法人與融資': '法人與融資'};
+async function loadProgress() {
+  let d; try { d = await api('/api/lab/progress'); } catch (e) { $('lab-progress').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  if (!d.logs.length) { $('lab-progress').innerHTML = '<p class="hint">還沒有執行紀錄。</p>'; return; }
+  const latest = d.logs[0];
+  const bars = Object.entries(latest.progress).map(([m, p]) => `<div style="margin-bottom:10px"><strong>${m === 'twse' ? '上市' : '上櫃'}</strong>
+    ${esc(STAGE[p.stage] || p.stage)}：${esc(p.at)}（${p.done}/${p.total}，${Math.round(p.done / p.total * 100)}%）
+    <div class="progress"><div style="width:${p.done / p.total * 100}%"></div></div></div>`).join('');
+  $('lab-progress').innerHTML = `<p class="hint" style="margin-top:0">${d.running_anywhere ? '<span class="tag warn">執行中</span>' : '<span class="tag ok">沒有正在執行的研究</span>'}
+     紀錄檔 ${esc(latest.log)}，更新於 ${new Date(latest.mtime * 1000).toLocaleString('zh-TW')}。每個市場依序跑三個階段：每日行情 → 產業名單與本益比 → 法人與融資。</p>
+     ${bars || ''}<details><summary class="hint">最後幾行輸出</summary><div class="md"><pre>${esc(latest.tail.join('\n'))}</pre></div></details>`;
+  if (d.running_anywhere && $('tab-lab').classList.contains('on')) { clearTimeout(loadProgress._h); loadProgress._h = setTimeout(loadProgress, 30000); }
+}
+async function loadReports() {
+  const list = await api('/api/reports').catch(() => []);
+  $('rep-list').innerHTML = list.length ? list.map(r => `<button onclick="openReport('${esc(r.name)}', this)">${esc(r.name.replace('.md', ''))}<small>${new Date(r.mtime * 1000).toLocaleString('zh-TW')}</small></button>`).join('')
+    : '<p class="hint">還沒有報告。</p>';
+}
+async function openReport(name, btn) {
+  document.querySelectorAll('#rep-list button').forEach(b => b.classList.toggle('on', b === btn));
+  const r = await api('/api/reports/' + encodeURIComponent(name)); $('rep-view').innerHTML = md(r.text);
+}
+
+// ---------- 設定 ----------
+async function loadStatus() {
+  const d = await api('/api/status').catch(e => ({error: e.message}));
+  if (d.error) { $('st-tasks').innerHTML = `<tr><td class="err">${esc(d.error)}</td></tr>`; return; }
+  $('st-tasks').innerHTML = '<tr><th>工作</th><th>狀態</th><th>上次執行</th><th>結果</th><th>下次執行</th></tr>' + (d.tasks.length ? d.tasks.map(t =>
+    `<tr><td>${esc(t.name)}</td><td>${t.state === 'Ready' ? '<span class="tag ok">已啟用</span>' : `<span class="tag warn">${esc(t.state)}</span>`}</td>
+     <td>${esc(t.last)}</td><td>${t.result === 0 ? '成功' : esc(t.result)}</td><td>${esc(t.next)}</td></tr>`).join('') : '<tr><td colspan="5">沒有找到排程</td></tr>');
+  $('st-log-mb').textContent = d.logs.morning_brief.join('\n') || '（尚無紀錄）';
+  $('st-log-ca').textContent = d.logs.check_alerts.join('\n') || '（尚無紀錄）';
+  $('envbar').innerHTML = `<span>Discord ${d.discord_configured ? '<span class="tag ok">已設定</span>' : '<span class="tag bad">未設定</span>'}</span>
+    <span>Ollama ${d.ollama ? '<span class="tag ok">' + esc(d.ollama_model) + '</span>' : '<span class="tag warn">未啟動</span>'}</span>`;
+}
+async function loadPortfolio() {
+  const d = await api('/api/portfolio'); $('pf-text').value = d.text;
+  $('pf-msg').textContent = d.exists ? '' : '目前沒有 portfolio.json，顯示的是範例；儲存後才會建立。';
+}
+async function savePortfolio() {
+  if (!confirm('儲存 portfolio.json？舊版會自動備份。')) return;
+  try { const d = await api('/api/portfolio', {method: 'PUT', body: JSON.stringify({text: $('pf-text').value})});
+    $('pf-msg').innerHTML = '<span class="pos">已儲存</span>' + (d.backup ? `，舊版備份在 ${esc(d.backup)}` : ''); }
+  catch (e) { $('pf-msg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+// ---------- 啟動 ----------
+loadStatus();
+let first = 'overview'; try { first = localStorage.getItem('tab') || 'overview'; } catch (_) {}
+(document.querySelector(`nav button[data-tab="${first}"]`) || document.querySelector('nav button')).click();
+</script>
+</body>
+</html>

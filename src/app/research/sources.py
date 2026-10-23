@@ -9,9 +9,9 @@
 """
 from __future__ import annotations
 import io
-import json
+import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -92,19 +92,16 @@ def _months_ago(d: date, n: int) -> tuple[int, int]:
 
 # ---------------- 月營收 ----------------
 
-def monthly_revenue(year: int, month: int, *, today: date | None = None) -> pd.DataFrame:
-    """某月全部上市公司營收。欄位：code, name, revenue, prev_month, last_year, mom_pct, yoy_pct, cum, cum_last, cum_yoy_pct, note"""
-    today = today or date.today()
-    roc = year - 1911
-    # 兩個月前以前的資料視為定案（之後偶有更正，影響小）
-    settled = (year, month) <= _months_ago(today, 2)
-    path = CACHE / 'revenue' / f'{year}{month:02d}.json'
-
-    def load():
-        url = f'https://mopsov.twse.com.tw/nas/t21/sii/t21sc03_{roc}_{month}_0.html'
-        r = _get(url, host='mopsov', encoding='big5')
-        rows = []
-        for t in pd.read_html(io.StringIO(r.text), flavor='lxml'):
+def parse_revenue_html(text: str) -> pd.DataFrame:
+    """月營收頁面依「產業別：XX」分段，每段一張表。"""
+    rows = []
+    parts = re.split(r'產業別：([^<（(]+)', text)
+    for industry, seg in zip(parts[1::2], parts[2::2]):
+        try:
+            tables = pd.read_html(io.StringIO(seg), flavor='lxml')
+        except ValueError:
+            continue
+        for t in tables:
             if t.shape[1] < 10:
                 continue
             for _, row in t.iterrows():
@@ -115,15 +112,45 @@ def monthly_revenue(year: int, month: int, *, today: date | None = None) -> pd.D
                 if vals[0] is None:
                     continue
                 note = str(row.iloc[10]).strip() if t.shape[1] > 10 else ''
-                rows.append({'code': code, 'name': str(row.iloc[1]).strip(), 'revenue': vals[0],
-                             'prev_month': vals[1], 'last_year': vals[2], 'mom_pct': vals[3],
+                rows.append({'code': code, 'name': str(row.iloc[1]).strip(), 'industry': industry.strip(),
+                             'revenue': vals[0], 'prev_month': vals[1], 'last_year': vals[2], 'mom_pct': vals[3],
                              'yoy_pct': vals[4], 'cum': vals[5], 'cum_last': vals[6], 'cum_yoy_pct': vals[7],
                              'note': '' if note in ('-', 'nan') else note})
-        if not rows:
-            raise NoData(f'{year}-{month:02d} 月營收尚未公布')
-        return pd.DataFrame(rows).drop_duplicates('code')
+    return pd.DataFrame(rows).drop_duplicates('code') if rows else pd.DataFrame()
 
-    return _cached(path, settled, load)
+
+def monthly_revenue(year: int, month: int, *, today: date | None = None, market: str = 'sii') -> pd.DataFrame:
+    """某月全部上市（market='sii'）或上櫃（'otc'）公司營收，含 KY 等外國企業。
+    欄位：code, name, industry, revenue, prev_month, last_year, mom_pct, yoy_pct, cum, cum_last, cum_yoy_pct, note
+    觀測站把本國企業（..._0.html）與外國企業（..._1.html，KY 公司）分成兩頁，分別快取。"""
+    today = today or date.today()
+    roc = year - 1911
+    # 兩個月前以前的資料視為定案（之後偶有更正，影響小）
+    settled = (year, month) <= _months_ago(today, 2)
+    base = 'revenue' if market == 'sii' else f'revenue_{market}'
+
+    def page(kind: int):
+        def load():
+            url = f'https://mopsov.twse.com.tw/nas/t21/{market}/t21sc03_{roc}_{month}_{kind}.html'
+            r = _get(url, host='mopsov', encoding='big5')
+            df = parse_revenue_html(r.text)
+            if df.empty and kind == 0:
+                raise NoData(f'{year}-{month:02d} 月營收尚未公布')
+            return df
+        return load
+
+    path = CACHE / base / f'{year}{month:02d}.json'
+    df = _cached(path, settled, page(0))
+    if 'industry' not in df.columns:   # 舊版快取沒有產業別，重抓一次
+        path.unlink(missing_ok=True)
+        df = _cached(path, settled, page(0))
+    try:
+        foreign = _cached(CACHE / f'{base}_foreign' / f'{year}{month:02d}.json', settled, page(1))
+    except requests.RequestException:
+        foreign = pd.DataFrame()     # 外國企業頁抓不到時，至少回傳本國企業
+    if not foreign.empty:
+        df = pd.concat([df, foreign], ignore_index=True).drop_duplicates('code')
+    return df
 
 
 def revenue_history(code: str, months: int = 25, *, today: date | None = None) -> pd.DataFrame:
@@ -157,16 +184,16 @@ _INCOME_COLS = {
 }
 
 
-def quarterly_income(year: int, season: int, *, today: date | None = None) -> pd.DataFrame:
+def quarterly_income(year: int, season: int, *, today: date | None = None, market: str = 'sii') -> pd.DataFrame:
     """某季全部上市公司綜合損益（當年累計數，單位：千元；EPS 為元）。"""
     today = today or date.today()
-    path = CACHE / 'income' / f'{year}Q{season}.json'
+    path = CACHE / ('income' if market == 'sii' else f'income_{market}') / f'{year}Q{season}.json'
     settled = date(year, season * 3, 1) + timedelta(days=200) < today
 
     def load():
         r = _get('https://mopsov.twse.com.tw/mops/web/ajax_t163sb04', host='mopsov', encoding='utf-8',
                  data={'encodeURIComponent': 1, 'step': 1, 'firstin': 1, 'off': 1, 'isQuery': 'Y',
-                       'TYPEK': 'sii', 'year': str(year - 1911), 'season': f'{season:02d}'})
+                       'TYPEK': market, 'year': str(year - 1911), 'season': f'{season:02d}'})
         if '<table' not in r.text:
             raise NoData(f'{year}Q{season} 財報尚未公布')
         rows = []

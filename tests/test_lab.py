@@ -196,5 +196,85 @@ class TestShortTerm(unittest.TestCase):
         self.assertLess(days[days.get_loc(cutoff) + 20], pd.Timestamp('2021-01-01'))
 
 
+class TestMarket(unittest.TestCase):
+    def test_roc_dates(self):
+        from src.app.lab.market import _roc
+        for s in ['108/01/30', '108年01月30日', '1080130']:
+            self.assertEqual(_roc(s), pd.Timestamp('2019-01-30'))
+
+    def test_parse_quotes(self):
+        from src.app.lab.market import parse_twse_quotes, parse_tpex_quotes
+        tw = {'tables': [{}, {'fields': ['證券代號', '證券名稱', '成交股數', '成交筆數', '成交金額', '開盤價', '最高價', '最低價', '收盤價'],
+                              'data': [['2448', '晶電', '14,222,527', '1', '1', '1', '1', '1', '25.95'],
+                                       ['9999', '停牌', '0', '0', '0', '--', '--', '--', '--']]}]}
+        df = parse_twse_quotes(tw)
+        self.assertEqual(df.set_index('code').loc['2448', 'close'], 25.95)
+        self.assertTrue(pd.isna(df.set_index('code').loc['9999', 'close']))
+        tp = {'tables': [{'fields': ['代號', '名稱', '收盤 ', '漲跌', '開盤 ', '最高 ', '最低', '成交股數  '],
+                          'data': [['3105', '穩懋', '149.50', '+1.50', '151', '151', '147', '8,284,000']]}]}
+        self.assertEqual(parse_tpex_quotes(tp).iloc[0]['volume'], 8284000)
+        self.assertTrue(parse_tpex_quotes({'tables': [{'data': []}]}).empty)
+
+    def test_adjust_prices(self):
+        from src.app.lab.market import adjust_prices
+        idx = pd.bdate_range('2020-01-01', periods=10)
+        close = pd.DataFrame({
+            'DIV': [100, 101, 102, 98, 99, 100, 100, 100, 100, 100],      # 第 3 天除息 4 元（參考價 98）
+            'CR':  [10, 10, 10, 10, 20, 20.5, 20, 20, 20, 20],            # 第 4 天減資恢復買賣，參考價 20
+            'GAP': [50, 50, 50, 50, np.nan, 50, 50, 50, 50, 50],         # 停牌一天
+            'DEL': [30, 30, 30, 30, 30, 30, np.nan, np.nan, np.nan, np.nan],   # 下市
+            'ODD': [10, 10, 10, 10, 10, 10, 10, 30, 30, 30],              # 無紀錄的跳動
+        }, index=idx, dtype=float)
+        ev = pd.DataFrame({'date': [idx[3], idx[4]], 'code': ['DIV', 'CR'], 'prev_close': [102.0, 10.0], 'ref': [98.0, 20.0]})
+        adj, notes = adjust_prices(close, ev)
+        r = adj.pct_change(fill_method=None)
+        self.assertAlmostEqual(r.loc[idx[3], 'DIV'], 0.0)                   # 98/98 - 1
+        self.assertAlmostEqual(adj.loc[idx[9], 'DIV'], 100.0)               # 事件後價格不動
+        self.assertAlmostEqual(r.loc[idx[4], 'CR'], 0.0)
+        self.assertAlmostEqual(r.loc[idx[5], 'CR'], 0.025)
+        self.assertEqual(adj.loc[idx[4], 'GAP'], 50)                        # 停牌日沿用前一日
+        self.assertTrue(adj.loc[idx[6]:, 'DEL'].isna().all())               # 下市後保持缺值
+        self.assertAlmostEqual(r.loc[idx[7], 'ODD'], 0.0)                   # 超過漲跌幅且無紀錄 → 歸零
+        self.assertTrue(any('超過漲跌幅' in n for n in notes))
+        # 最新價格要等於實際收盤（每日模擬拿實際收盤比還原均線；0050 拆股曾差 4 倍）
+        self.assertAlmostEqual(adj.loc[idx[9], 'ODD'], 30.0)
+        self.assertAlmostEqual(adj.loc[idx[0], 'ODD'], 30.0)
+        self.assertAlmostEqual(adj.loc[idx[9], 'DIV'], 100.0)              # 有異常跳動時其他股票也不受影響
+        self.assertAlmostEqual(adj.loc[idx[5], 'DEL'], 30.0)               # 下市股以最後交易日為基準
+
+    def test_universe_includes_delisted_and_is_point_in_time(self):
+        from unittest import mock
+        from src.app.lab import market
+        from src.app.lab.constituents import members_on
+        days = pd.DatetimeIndex(['2019-01-30', '2019-01-31', '2019-02-27', '2019-02-28'])
+        snap = {('twse', '20190131', 26): ['2448', '3008'], ('twse', '20190228', 26): ['3008'],
+                ('tpex', '20190131', 24): ['3105'], ('tpex', '20190228', 24): ['3105', '6488']}
+        with mock.patch.object(market, 'industry_day', side_effect=lambda m, d, c: snap.get((m, f'{d:%Y%m%d}', c), [])):
+            hist, info = market.build_universe(('twse', 'tpex'), days)
+        self.assertEqual(members_on(hist, pd.Timestamp('2019-01-31')), {'2448', '3008', '3105'})
+        self.assertEqual(members_on(hist, pd.Timestamp('2019-02-28')), {'3008', '3105', '6488'})
+        self.assertEqual(info['2448'], ('twse', '光電業'))
+        self.assertEqual(info['6488'], ('tpex', '半導體業'))
+
+
+class TestFactorGroups(unittest.TestCase):
+    def test_predictive_feature_has_positive_spread(self):
+        from src.app.lab.factors import factor_groups
+        rng = np.random.default_rng(0)
+        idx = pd.bdate_range('2020-01-01', periods=400)
+        codes = [f'S{i}' for i in range(50)]
+        px = pd.DataFrame(100.0, index=idx, columns=codes)
+        good = pd.DataFrame(rng.normal(size=(len(idx), 50)), index=idx, columns=codes)
+        noise = pd.DataFrame(rng.normal(size=(len(idx), 50)), index=idx, columns=codes)
+        target = good * 0.02 + pd.DataFrame(rng.normal(scale=0.02, size=(len(idx), 50)), index=idx, columns=codes)
+        res = {r.feature: r for r in factor_groups({'good': good, 'noise': noise, 'target': target}, px,
+                                                   lambda d: set(codes), ['good', 'noise'], start='2020-01-01', end=idx[-1])}
+        self.assertGreater(res['good'].spread, 0.03)
+        self.assertGreater(res['good'].spread_t, 5)
+        self.assertLess(abs(res['noise'].spread_t), 3)
+        self.assertEqual(res['good'].periods, (400 - 20 + 19) // 20)
+        self.assertAlmostEqual(sum(res['good'].group_excess), 0, places=6)   # 等量分組，超額報酬合計為 0
+
+
 if __name__ == '__main__':
     unittest.main()

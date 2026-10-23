@@ -89,11 +89,6 @@ def size_position(*, capital: float, max_risk_per_trade: float, entry: float, st
     }
 
 
-def actual_risk(shares: float, entry: float, stop: float, capital: float) -> dict:
-    risk = max(0.0, (entry - stop) * shares)
-    return {'risk_at_stop': risk, 'risk_pct': risk / capital}
-
-
 # --- 計畫檔（state/plans.json）---
 
 def load_plans(path: Path) -> list[dict]:
@@ -179,13 +174,14 @@ def thesis_review_due(h: Holding, today: date, review_days: int) -> int | None:
 
 
 def portfolio_risk(holdings_closes: list[tuple[Holding, float, float]], risk: dict) -> dict:
-    """holdings_closes: [(holding, 收盤價, 換算台幣匯率)]。總曝險只計入有停損價的持股。"""
+    """holdings_closes: [(holding, 收盤價, 換算台幣匯率)]。
+    risk.capital 是「操作個股」的資金，所以總曝險只計入有停損價的個股；ETF（長期部位）不計入，也不受單一持股上限。"""
     capital = risk['capital']
     open_risk, positions = 0.0, []
     for h, close, fx in holdings_closes:
         value = h.shares * close * fx
         stop = h.stop_level()
-        r = max(0.0, (close - stop) * h.shares * fx) if stop is not None else None
+        r = max(0.0, (close - stop) * h.shares * fx) if stop is not None and not h.is_etf else None
         if r is not None:
             open_risk += r
         positions.append({'symbol': h.symbol, 'label': h.label, 'value': value,

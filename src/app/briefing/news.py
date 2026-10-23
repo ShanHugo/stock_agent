@@ -5,9 +5,11 @@
   個別持股    Yahoo 奇摩股市個股 RSS（只留標題含代號或名稱的）
 """
 from __future__ import annotations
+import json
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import requests
@@ -15,7 +17,7 @@ import requests
 from ..alerts.portfolio import Portfolio
 
 UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36'}
-WINDOW_HOURS = 18     # 08:30 往回 18 小時 ≈ 前一天台股收盤後 + 整個美股交易時段
+# 新聞時間窗：前一個交易日 14:30 之後（見 news_since），涵蓋台股收盤後、整個美股交易時段，以及週末與連假
 PER_SECTION = 5
 PER_STOCK = 3
 ETF_ISSUERS = ('元大', '國泰', '富邦', '群益', '中信', '復華', '永豐', '凱基', '統一', '台新', '第一金', '兆豐', '野村')
@@ -59,6 +61,33 @@ def aliases(code: str, name: str) -> list[str]:
     return out
 
 
+QUOTES_CACHE = Path('data/raw/lab/market/twse/quotes')
+SESSION_CLOSE = time(14, 30)
+MAX_LOOKBACK_DAYS = 16      # 春節連假加前後週末可能超過 10 天
+
+
+def _is_holiday(d: date) -> bool:
+    """週末，或行情快取顯示當天休市（有快取且沒有資料）。沒有快取時視為交易日。"""
+    if d.weekday() >= 5:
+        return True
+    path = QUOTES_CACHE / f'{d:%Y%m%d}.json'
+    try:
+        return path.exists() and not json.loads(path.read_text(encoding='utf-8')).get('data')
+    except (OSError, ValueError):
+        return False
+
+
+def news_since(now: datetime, is_holiday=_is_holiday) -> datetime:
+    """前一個交易日 14:30（台股收盤後）。週一往回到週五、連假後往回到假期前最後一個交易日，
+    這樣週末與連假期間的新聞（含週五晚上的美股）都會收進來。"""
+    d = now.date() - timedelta(days=1)
+    for _ in range(MAX_LOOKBACK_DAYS):
+        if not is_holiday(d):
+            break
+        d -= timedelta(days=1)
+    return datetime.combine(d, SESSION_CLOSE, tzinfo=now.tzinfo)
+
+
 def _recent(items: list[dict], since: datetime) -> list[dict]:
     return [i for i in items if i['published'] and i['published'] >= since]
 
@@ -74,7 +103,7 @@ def _dedupe(items: list[dict], seen: set[str]) -> list[dict]:
 
 
 def collect_news(portfolio: Portfolio, now: datetime, errors: list[str], fetch=fetch_feed) -> dict:
-    since = now - timedelta(hours=WINDOW_HOURS)
+    since = news_since(now)
     seen: set[str] = set()
 
     def get(name, *args, **kw):

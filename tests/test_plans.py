@@ -131,6 +131,14 @@ class TestPlanChecks(unittest.TestCase):
         self.assertTrue(r['total_risk_exceeded'])
         self.assertEqual([p['symbol'] for p in r['oversized']], ['2330'])  # 50,000 > 40%
 
+    def test_etf_with_stop_not_in_total_risk(self):
+        # risk.capital 是個股資金：0050 有停損也不計入總曝險
+        etf = Holding(symbol='0050', shares=200, cost=90, stop_loss_pct=-0.2)
+        stock = Holding(symbol='2317', shares=10, cost=200, stop_price=190)
+        r = portfolio_risk([(etf, 107, 1.0), (stock, 200, 1.0)], {'capital': 12_000, 'max_total_risk': 0.08})
+        self.assertAlmostEqual(r['open_risk'], 100)
+        self.assertFalse(r['total_risk_exceeded'])
+
 
 class TestRunnerWithPlans(unittest.TestCase):
     def test_plan_invalid_and_review_and_risk(self):

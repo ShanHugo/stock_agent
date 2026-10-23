@@ -44,21 +44,24 @@ class OllamaNarrator:
     def __init__(self, model: str = 'qwen3.5:9b', url: str = 'http://localhost:11434', timeout: int = 180):
         self.model, self.url, self.timeout = model, url.rstrip('/'), timeout
 
-    def summarize(self, text: str, has_triggered: bool = True) -> tuple[str | None, str | None]:
-        """回傳 (講評, 錯誤原因)。"""
+    def chat(self, prompt: str) -> str:
+        r = requests.post(f'{self.url}/api/chat', timeout=self.timeout, json={
+            'model': self.model,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'stream': False,
+            'think': False,
+            'options': {'temperature': 0.2},
+        })
+        r.raise_for_status()
+        out = r.json()['message']['content'].strip()
+        return re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip().replace('\n', ' ')
+
+    def summarize(self, text: str, has_triggered: bool = True, prompt: str = PROMPT) -> tuple[str | None, str | None]:
+        """回傳 (講評, 錯誤原因)。prompt 需含 {text}。"""
         try:
-            r = requests.post(f'{self.url}/api/chat', timeout=self.timeout, json={
-                'model': self.model,
-                'messages': [{'role': 'user', 'content': PROMPT.format(text=text)}],
-                'stream': False,
-                'think': False,
-                'options': {'temperature': 0.2},
-            })
-            r.raise_for_status()
-            out = r.json()['message']['content'].strip()
+            out = self.chat(prompt.format(text=text))
         except Exception as e:
             return None, f'Ollama 呼叫失敗: {e}'
-        out = re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip().replace('\n', ' ')
         bad = unsupported_numbers(out, text)
         if bad:
             return None, f'講評含有提醒中沒有的數字 {sorted(bad)}，已捨棄：{out}'

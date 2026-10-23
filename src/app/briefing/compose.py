@@ -1,25 +1,34 @@
-"""組合盤前簡報：整理影響因素與「依你自己規則」的狀態。只陳述資訊，不產生買賣建議。"""
+"""組合盤前簡報：隔夜行情、行事曆、族群雷達與新聞。只陳述資訊，不產生買賣建議。
+
+持股狀態與停損提醒由 14:30 的持股提醒負責，模擬帳戶的單由模擬帳戶頻道推送，簡報不重複列出。
+"""
 from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from ..alerts.portfolio import Portfolio
-from ..alerts.runner import run_alerts
-from ..alerts.rules import TRIGGERED, NEAR_STOP, NEAR_TARGET
-from ..alerts.notify import TITLES
+import json
+from pathlib import Path
+
+import requests
+
 from . import sources as src
 from . import news as news_mod
+from . import sector_news
 
 WEEKDAYS = '一二三四五六日'
 LOOKAHEAD_DAYS = 7       # 美國行事曆往後看幾天
 EXDIV_LOOKAHEAD = 14     # 除權息往後看幾天
-DISCLAIMER = '_整理公開資訊與你自己設定的規則狀態，非投資建議；是否交易請自行判斷。_'
+DISCLAIMER = '_整理公開資訊，非投資建議；是否交易請自行判斷。持股狀態見 14:30 持股提醒，模擬帳戶見專用頻道。_'
+US_MARKETS = ('^GSPC', '^IXIC', '^SOX', '^VIX', '^TNX', 'TSM')   # 美股收盤時間相同；匯率另計
 LIMITATIONS = ['CPI、非農就業等 BLS 發布日無法自動取得（BLS 封鎖程式存取），請以 bls.gov 行事曆為準']
 
 
-def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, default_tw_fee_bps: float,
+def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher,
                    fetch_taifex=src.fetch_taifex, fetch_html=src.fetch_html,
                    fetch_twse=src.fetch_twse_openapi, fetch_feed=news_mod.fetch_feed,
-                   include_news: bool = True) -> dict:
+                   fetch_cnyes=requests.get, include_news: bool = True,
+                   radar_path: Path | None = Path('state/radar/latest.json'),
+                   scheduler_dir: Path | None = Path('state/scheduler')) -> dict:
     today = now.date()
     errors: list[str] = []
     b = {'date': today, 'errors': errors, 'limitations': list(LIMITATIONS)}
@@ -32,7 +41,7 @@ def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, defaul
         b['adr'] = None
         errors.append(f'台積電 ADR 溢價: {e}')
     try:
-        b['taifex'] = src.taifex_night(fetch_taifex())
+        b['taifex'] = src.taifex_night(fetch_taifex(today))
     except Exception as e:
         b['taifex'] = None
         errors.append(f'台指期: {e}')
@@ -68,17 +77,76 @@ def build_briefing(portfolio: Portfolio, *, now: datetime, price_fetcher, defaul
         errors.append(f'重大訊息: {e}')
 
     b['news'] = news_mod.collect_news(portfolio, now, errors, fetch=fetch_feed) if include_news else None
-
-    # 依你自己的規則：沿用每日檢查的判斷，但不寫入 state（不影響 14:30 的檢查）
-    res = run_alerts(portfolio, price_fetcher, today=today, default_tw_fee_bps=default_tw_fee_bps,
-                     state_path=None, force=True, now=now)
-    b['holdings'] = res['evaluations']
-    b['rule_alerts'] = res['alerts']
-    b['drawdowns'] = res['drawdowns']
-    b['reviews'] = res.get('reviews', [])
-    b['risk'] = res['risk'] if res.get('risk') and (res['risk']['total_risk_exceeded'] or res['risk']['oversized']) else None
-    errors.extend(e for e in res['errors'] if e not in errors)
+    b['radar'] = load_radar(radar_path, today)
+    errors.extend(scheduler_problems(scheduler_dir, news_mod.news_since(now).date()))
+    b['sector_news'] = None
+    if include_news:
+        from ..lab.themes import load_code_themes
+        b['sector_news'] = sector_news.collect(now, load_code_themes(), errors, get=fetch_cnyes)
     return b
+
+
+RADAR_SHOW = 5
+RADAR_MAX_AGE_DAYS = 5
+
+
+def load_radar(path: Path | None, today: date) -> dict | None:
+    """前一個交易日收盤後算好的族群雷達（scripts/sector_radar.py）；太舊或不存在就不列。"""
+    if not path or not path.exists():
+        return None
+    try:
+        r = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    if (today - date.fromisoformat(r['date'])).days > RADAR_MAX_AGE_DAYS or not r.get('rows'):
+        return None
+    return r
+
+
+DAILY_TASKS = {'paper_exec': '09:30 模擬帳戶成交', 'check_alerts': '14:30 持股提醒', 'forward_test': '16:30 前瞻測試',
+               'sector_radar': '16:45 族群雷達', 'paper_bot': '16:50 模擬帳戶收盤'}
+
+
+def scheduler_problems(state_dir: Path | None, prev_session: date) -> list[str]:
+    """前一個交易日應該執行的排程：沒執行（例如電腦沒開）或執行失敗的，列出來。
+    還沒有任何紀錄的排程（剛設定好）不算。"""
+    if not state_dir or not state_dir.exists():
+        return []
+    out = []
+    for name, label in DAILY_TASKS.items():
+        path = state_dir / f'{name}.json'
+        if not path.exists():
+            continue
+        try:
+            s = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        ran = datetime.fromisoformat(s['time']).date()
+        if ran < prev_session:
+            out.append(f'排程沒有執行：{label}（最後一次 {ran:%m/%d}；電腦當時可能沒開）')
+        elif s.get('rc'):
+            out.append(f'排程失敗：{label}（{ran:%m/%d}，結束代碼 {s["rc"]}；詳見 logs\\{name}.log）')
+    return out
+
+
+def format_radar(r: dict | None) -> list[str]:
+    if not r:
+        return []
+    d = r['date']
+    lines = ['', f"**族群雷達（{d[5:7]}/{d[8:]} 收盤；依營收年增、近 60 日漲跌、量能、融資增減排序）**"]
+    for row in r['rows'][:RADAR_SHOW]:
+        lines.append(f"- {row['rank']}. {row['theme']}（{int(row['members'])} 檔）：營收年增中位數 {row['rev_yoy']:+.1f}%、"
+                     f"連 2 月年增 {row['rev_breadth']:.0%}、近 60 日 {_p(row['r60'], 1)}、站上 120 日線 {row['above_ma']:.0%}")
+    last = r['rows'][-1]
+    lines.append(f"- 排名最後：{last['theme']}（營收年增中位數 {last['rev_yoy']:+.1f}%、近 60 日 {_p(last['r60'], 1)}）")
+    bt = (r.get('backtest') or {}).get('20')
+    if bt:
+        lines.append(f"_歷史驗證（{bt['periods']} 期）：前 3 名族群每 20 天平均比 0050 {_p(bt['top_vs_bench'])}"
+                     f"（t 值 {bt['top_vs_bench_t']:+.1f}，贏的期數 {bt['top_beats_bench']:.0%}）；"
+                     f"比後 3 名 {_p(bt['top_vs_bottom'])}。排名是資料整理，不是買賣建議。_")
+    else:
+        lines.append('_排名是資料整理，尚未完成歷史驗證，不是買賣建議。_')
+    return lines
 
 
 def _p(v, digits=2):
@@ -97,28 +165,37 @@ def format_briefing(b: dict, narration: str | None = None) -> str:
 
     m = b['markets']
     if m:
-        us_date = next((v['date'] for k, v in m.items() if k in ('^GSPC', '^IXIC')), '')
+        # 各檔最新日期可能不同（2026-10-23 早上 TSM 還停在 10/21，卻被當成 10/22 收盤），舊的要標出來
+        us_date = max((v['date'] for k, v in m.items() if k in US_MARKETS), default='')
+
+        def stale(sym):
+            return f"（資料停在 {m[sym]['date'][5:].replace('-', '/')}，不是最新）" if m[sym]['date'] < us_date else ''
         lines += ['', f'**隔夜美股（{us_date} 收盤）**']
         for sym in ('^GSPC', '^IXIC', '^SOX', '^VIX'):
             if sym in m:
-                lines.append(f"- {m[sym]['name']} {_num(m[sym]['close'])}（{_p(m[sym]['change_pct'])}）")
+                lines.append(f"- {m[sym]['name']} {_num(m[sym]['close'])}（{_p(m[sym]['change_pct'])}）{stale(sym)}")
         if '^TNX' in m:
             t = m['^TNX']
-            lines.append(f"- {t['name']} {t['close']:.2f}%（{(t['close'] - t['prev']) * 100:+.0f} 個基點）")
+            lines.append(f"- {t['name']} {t['close']:.2f}%（{(t['close'] - t['prev']) * 100:+.0f} 個基點）{stale('^TNX')}")
         if 'TWD=X' in m:
             lines.append(f"- 美元兌台幣 {m['TWD=X']['close']:.3f}（{_p(m['TWD=X']['change_pct'])}）")
         if 'TSM' in m:
-            lines.append(f"- 台積電 ADR {_num(m['TSM']['close'])} USD（{_p(m['TSM']['change_pct'])}）")
+            lines.append(f"- 台積電 ADR {_num(m['TSM']['close'])} USD（{_p(m['TSM']['change_pct'])}）{stale('TSM')}")
     if b.get('adr'):
         a = b['adr']
-        lines.append(f"- ADR 換算每股 {a['per_share_twd']:,.1f} 台幣，相對台股 2330 收盤 {a['tw_close']:,.0f}："
-                     f"{_p(a['premium'], 1)}")
+        lines.append(f"- ADR 換算每股 {a['per_share_twd']:,.1f} 台幣，比台股 2330 收盤 {a['tw_close']:,.0f} "
+                     f"{'貴' if a['premium'] >= 0 else '便宜'} {abs(a['premium']) * 100:.1f}%（ADR 溢價，不是漲跌幅）"
+                     f"{stale('TSM') if 'TSM' in m else ''}")
 
     tx = b.get('taifex')
-    if tx and tx.get('night_close'):
+    if tx and tx.get('day_close'):
         td = tx['date']
-        lines += ['', f"**台指期近月（{tx['contract']}，{td[4:6]}/{td[6:]} 日盤與夜盤）**",
-                  f"- 日盤收 {tx['day_close']:,.0f}，夜盤收 {tx['night_close']:,.0f}（相對日盤 {_p(tx['night_vs_day'])}）"]
+        if tx.get('night_close'):
+            lines += ['', f"**台指期近月（{tx['contract']}，{td[4:6]}/{td[6:]} 日盤與之後的夜盤）**",
+                      f"- 日盤收 {tx['day_close']:,.0f}，夜盤收 {tx['night_close']:,.0f}（相對日盤 {_p(tx['night_vs_day'])}）"]
+        else:
+            lines += ['', f"**台指期近月（{tx['contract']}，{td[4:6]}/{td[6:]} 日盤）**",
+                      f"- 日盤收 {tx['day_close']:,.0f}；之後的夜盤資料期交所尚未公布"]
 
     lines += ['', f'**行事曆（未來 {LOOKAHEAD_DAYS} 天，台北時間）**']
     def when(t):
@@ -140,42 +217,12 @@ def format_briefing(b: dict, narration: str | None = None) -> str:
     for a in b.get('announcements', []):
         lines.append(f"- 重大訊息 {a['code']} {a['name']}：{a['subject']}")
 
+    lines += format_radar(b.get('radar'))
+    lines += sector_news.format_section(b.get('sector_news'), src.TPE)
     if b.get('news'):
         lines += news_mod.format_news(b['news'], src.TPE)
-
-    if b['holdings']:
-        lines += ['', '**你的持股（最近收盤）**']
-        for ev in b['holdings']:
-            extra = []
-            if ev.get('stop_level'):
-                extra.append(f"距停損 {1 - ev['stop_level'] / ev['close']:.1%}")
-            if ev.get('target_level'):
-                extra.append(f"距停利 {ev['target_level'] / ev['close'] - 1:.1%}")
-            lines.append(f"- {ev['label']} {_num(ev['close'])}（{ev['date']}），未實現 {ev['unrealized_pct']:+.1%}"
-                         + (f"，{'、'.join(extra)}" if extra else ''))
-
-    lines += ['', '**依你設定的規則，今天要注意**']
-    notes = []
-    for a in b['rule_alerts']:
-        title = TITLES.get(a['kind'], a['kind'])
-        if a['kind'] in TRIGGERED:
-            notes.append(f"- {title}｜{a['label']}：收盤 {_num(a['close'])}，依你的規則動作為賣出")
-        elif a['kind'] in (NEAR_STOP, NEAR_TARGET):
-            lvl = a['stop_level'] if a['kind'] == NEAR_STOP else a['target_level']
-            notes.append(f"- {title}｜{a['label']}：收盤 {_num(a['close'])}，規則價位 {_num(lvl)}")
-    for dd in b['drawdowns']:
-        notes.append(f"- 從高點回落｜{dd['label']}：已回落 {dd['drawdown']:.1%}（超過你設的 {dd['level']:.0%}）")
-    for r in b['reviews']:
-        notes.append(f"- 理由待確認｜{r['label']}：{r['days']} 天未確認（{r['thesis']}）")
-    if b.get('risk'):
-        notes.append('- 部位風險超過你設的上限（詳見收盤後提醒）')
-    lines += notes or ['- 沒有接近或觸發你設定的任何規則']
 
     if b['errors']:
         lines += ['', '**⚠️ 抓取失敗**'] + [f'- {e}' for e in b['errors']]
     lines += ['', '_限制：' + '；'.join(b['limitations']) + '_', DISCLAIMER]
     return '\n'.join(lines)
-
-
-def has_triggered(b: dict) -> bool:
-    return any(a['kind'] in TRIGGERED for a in b['rule_alerts'])

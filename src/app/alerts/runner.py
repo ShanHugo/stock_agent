@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from ..pipeline.qa import run_quality_checks
+from ..data.qa import run_quality_checks
 from .portfolio import Portfolio, Holding
 from .rules import evaluate_holding, drawdown_status, allocation_status, OK, TRIGGERED
 from .plans import check_invalidation, thesis_review_due, portfolio_risk, validate_risk, FUNDAMENTAL_TYPES
