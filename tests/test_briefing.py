@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from src.app.briefing import sources as src
-from src.app.briefing.compose import build_briefing, format_briefing, has_triggered
+from src.app.briefing.compose import build_briefing, format_briefing
 from src.app.briefing import news
 from src.app.alerts.notify import _chunks
 from src.app.alerts.portfolio import Holding, Portfolio
@@ -35,7 +35,11 @@ BEA_HTML = """<table>
 TAIFEX = [
     {'Date': '20261019', 'Contract': 'TX', 'ContractMonth(Week)': '202611', 'TradingSession': '一般', 'Last': '46948'},
     {'Date': '20261019', 'Contract': 'TX', 'ContractMonth(Week)': '202610', 'TradingSession': '一般', 'Last': '46779'},
-    {'Date': '20261019', 'Contract': 'TX', 'ContractMonth(Week)': '202610', 'TradingSession': '盤後', 'Last': '46140'},
+    # 10/19 的「盤後」是 10/16 晚上的夜盤（在 10/19 日盤之前），不能用
+    {'Date': '20261019', 'Contract': 'TX', 'ContractMonth(Week)': '202610', 'TradingSession': '盤後', 'Last': '47999'},
+    # 10/19 日盤之後的夜盤，期交所歸在 10/20
+    {'Date': '20261020', 'Contract': 'TX', 'ContractMonth(Week)': '202610', 'TradingSession': '盤後', 'Last': '46140'},
+    {'Date': '20261020', 'Contract': 'TX', 'ContractMonth(Week)': '202611', 'TradingSession': '盤後', 'Last': '46300'},
     {'Date': '20261019', 'Contract': 'TX', 'ContractMonth(Week)': '202610/202611', 'TradingSession': '一般', 'Last': '175'},
     {'Date': '20261019', 'Contract': 'MTX', 'ContractMonth(Week)': '202610', 'TradingSession': '一般', 'Last': '1'},
 ]
@@ -73,6 +77,20 @@ class TestParsers(unittest.TestCase):
         self.assertEqual((t['contract'], t['day_close'], t['night_close']), ('202610', 46779, 46140))
         self.assertAlmostEqual(t['night_vs_day'], 46140 / 46779 - 1)
         self.assertIsNone(src.taifex_night([]))
+        # 昨晚夜盤還沒公布：不能拿日盤之前那一晚的夜盤頂替
+        t = src.taifex_night([r for r in TAIFEX if r['Date'] == '20261019'])
+        self.assertEqual((t['day_close'], t['night_close'], t['night_vs_day']), (46779, None, None))
+
+    def test_parse_taifex_csv(self):
+        csv_text = ('交易日期,契約,到期月份(週別),開盤價,最高價,最低價,收盤價,漲跌價,漲跌%,成交量,結算價,未沖銷契約數,'
+                    '最後最佳買價,最後最佳賣價,歷史最高價,歷史最低價,是否因訊息面暫停交易,交易時段,價差對單式委託成交量\n'
+                    '2026/10/22,TX,202611  ,47164,47337,46217,46272,-741,-1.58%,55226,46234,115258,46269,46278,50440,44435,,一般,,\n'
+                    '2026/10/22,TX,202611  ,46991,47555,46983,47482,469,1.00%,35753,-,-,47470,47482,50440,44435,,盤後,,\n'
+                    '2026/10/23,TX,202611  ,46270,46399,45523,45654,-580,-1.25%,39368,-,-,45652,45665,50440,44435,,盤後,,\n')
+        t = src.taifex_night(src.parse_taifex_csv(csv_text))
+        # 2026-10-23 實際案例：昨晚夜盤是 45,654（-1.33%），不是 10/22 列的 47,482（+2.61%）
+        self.assertEqual((t['date'], t['day_close'], t['night_close']), ('20261022', 46272, 45654))
+        self.assertAlmostEqual(t['night_vs_day'], 45654 / 46272 - 1)
 
     def test_adr_premium(self):
         m = {'TSM': {'close': 420.0}, 'TWD=X': {'close': 32.5}}
@@ -202,12 +220,12 @@ class TestCompose(unittest.TestCase):
     def build(self, holdings, **kw):
         pf = Portfolio(holdings=holdings)
         return build_briefing(
-            pf, now=datetime(2026, 10, 23, 8, 30, tzinfo=TPE), price_fetcher=prices, default_tw_fee_bps=1,
-            fetch_taifex=lambda: TAIFEX,
+            pf, now=datetime(2026, 10, 23, 8, 30, tzinfo=TPE), price_fetcher=prices,
+            fetch_taifex=lambda today: TAIFEX,
             fetch_html=lambda url: FOMC_HTML if 'federalreserve' in url else BEA_HTML,
             fetch_twse=lambda path: ([{'Date': '1151023', 'Code': '0050', 'Name': '元大台灣50', 'Exdividend': '息',
                                        'CashDividend': '1.0'}] if 'TWT48U' in path else []),
-            fetch_feed=fake_feed, fetch_cnyes=fake_cnyes, radar_path=None, paper_path=None, scheduler_dir=None, **kw)
+            fetch_feed=fake_feed, fetch_cnyes=fake_cnyes, radar_path=None, scheduler_dir=None, **kw)
 
     def test_full_briefing(self):
         b = self.build([Holding(symbol='0050', name='元大台灣50', shares=100, cost=95, stop_price=99.5)])
@@ -218,11 +236,12 @@ class TestCompose(unittest.TestCase):
         self.assertIn('FOMC 利率決議', txt)            # 10/29 02:00 在 10/23 起的 7 天內
         self.assertIn('GDP (Advance Estimate)', txt)
         self.assertIn('10/23 0050 元大台灣50 除息', txt)
-        self.assertIn('接近停損', txt)                 # 100 距 99.5 在 2% 內
+        self.assertNotIn('你的持股（最近收盤）', txt)   # 持股狀態交給 14:30 持股提醒（除權息事件仍保留）
+        self.assertNotIn('接近停損', txt)
+        self.assertNotIn('模擬帳戶今天', txt)          # 模擬單交給模擬帳戶頻道
         self.assertIn('非投資建議', txt)
         self.assertIn('[0050 規模創新高](<https://tw.example/1>)', txt)
         self.assertIn('**記憶體**（', txt)                # 族群新聞（未經模型整理時只列標題）
-        self.assertFalse(has_triggered(b))
 
     def test_source_failures_are_reported_not_fatal(self):
         pf = Portfolio(holdings=[])
@@ -230,12 +249,12 @@ class TestCompose(unittest.TestCase):
         def boom(*a, **k):
             raise ConnectionError('down')
         b = build_briefing(pf, now=datetime(2026, 10, 21, 8, 30, tzinfo=TPE), price_fetcher=prices,
-                           default_tw_fee_bps=1, fetch_taifex=boom, fetch_html=boom, fetch_twse=boom,
-                           fetch_feed=boom, fetch_cnyes=boom, radar_path=None, paper_path=None, scheduler_dir=None)
+                           fetch_taifex=boom, fetch_html=boom, fetch_twse=boom,
+                           fetch_feed=boom, fetch_cnyes=boom, radar_path=None, scheduler_dir=None)
         txt = format_briefing(b)
         self.assertIn('抓取失敗', txt)
         self.assertIn('鉅亨網新聞', txt)
-        self.assertIn('沒有接近或觸發你設定的任何規則', txt)
+        self.assertIn('非投資建議', txt)
 
 
 class TestRadarSection(unittest.TestCase):
@@ -259,26 +278,6 @@ class TestRadarSection(unittest.TestCase):
         self.assertIn('排名最後：IC設計', txt)
         self.assertIn('t 值 +0.8', txt)
         self.assertIn('不是買賣建議', txt)
-
-
-class TestPaperOrdersSection(unittest.TestCase):
-    def test_load_and_format(self):
-        import json
-        import tempfile
-        from pathlib import Path
-        from src.app.briefing.compose import load_paper_orders, format_paper_orders
-        with tempfile.TemporaryDirectory() as d:
-            p = Path(d) / 'latest.json'
-            self.assertEqual(load_paper_orders(p), [])
-            p.write_text(json.dumps({'pending': [
-                {'side': 'buy', 'code': '2408', 'name': '南亞科', 'shares': 5, 'ref_price': 436.5, 'reason': '營收動能', 'stop_est': 392.85},
-                {'side': 'sell', 'code': '3311', 'name': '閎暉', 'shares': 53, 'ref_price': 40.0, 'reason': '跌破 120 日線'}]},
-                ensure_ascii=False), encoding='utf-8')
-            txt = '\n'.join(format_paper_orders(load_paper_orders(p)))
-        self.assertIn('今天 09:30 要執行', txt)
-        self.assertIn('買進 2408 南亞科 5 股（昨收 436.50）', txt)
-        self.assertIn('賣出 3311 閎暉 53 股', txt)
-        self.assertEqual(format_paper_orders([]), [])
 
 
 class TestSchedulerProblems(unittest.TestCase):

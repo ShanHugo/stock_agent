@@ -1,7 +1,7 @@
 """盤前簡報的資料來源（2026-10 實測可用）。
 
   隔夜市場   Yahoo Finance（S&P 500、那斯達克、費城半導體、VIX、美 10 年債殖利率、美元兌台幣、台積電 ADR）
-  台指期     期交所 OpenAPI /v1/DailyMarketReportFut（含夜盤「盤後」交易時段）
+  台指期     期交所每日期貨行情下載 futDataDown（含夜盤「盤後」交易時段，夜盤歸在下一個交易日）
   FOMC      聯準會 fomccalendars.htm
   BEA       美國經濟分析局 news/schedule（GDP、個人所得與支出 / PCE 等）
   除權息     證交所 OpenAPI /v1/exchangeReport/TWT48U_ALL
@@ -77,29 +77,61 @@ def adr_premium(markets: dict, tw_close: float | None) -> dict | None:
 # ---------------- 台指期 ----------------
 
 def taifex_night(rows: list[dict]) -> dict | None:
-    """從期交所日報取近月台指期（TX）日盤與夜盤。夜盤漲跌改以「相對同日日盤收盤」計算。"""
+    """近月台指期（TX）最近一個日盤，以及「緊接在它之後」的夜盤。夜盤漲跌以相對該日盤收盤計算。
+
+    期交所把夜盤歸在「下一個交易日」：日期 D 的「盤後」列是 D 前一晚的夜盤（在 D 日盤之前）。
+    所以日盤 D 之後的夜盤，是日期大於 D 的「盤後」列；還沒有時 night_close 為 None。
+    （2026-10-23 曾誤用 D 當天的「盤後」列，把前一晚的 +2.61% 當成昨晚，實際昨晚是 -1.33%。）
+    """
     tx = [r for r in rows if r.get('Contract') == 'TX' and '/' not in r.get('ContractMonth(Week)', '')
           and len(r.get('ContractMonth(Week)', '')) == 6]
-    if not tx:
+    days = [r for r in tx if r['TradingSession'] == '一般']
+    if not days:
         return None
-    near = min(r['ContractMonth(Week)'] for r in tx)
-    day = next((r for r in tx if r['ContractMonth(Week)'] == near and r['TradingSession'] == '一般'), None)
-    night = next((r for r in tx if r['ContractMonth(Week)'] == near and r['TradingSession'] == '盤後'), None)
+    d_date = max(r['Date'] for r in days)
+    near = min(r['ContractMonth(Week)'] for r in days if r['Date'] == d_date)
+    day = next(r for r in days if r['Date'] == d_date and r['ContractMonth(Week)'] == near)
+    nights = sorted((r for r in tx if r['TradingSession'] == '盤後' and r['Date'] > d_date
+                     and r['ContractMonth(Week)'] == near), key=lambda r: r['Date'])
+    night = nights[0] if nights else None
 
     def num(v):
         try:
             return float(v)
         except (TypeError, ValueError):
             return None
-    d, n = (num(day['Last']) if day else None), (num(night['Last']) if night else None)
-    return {'date': (day or night)['Date'], 'contract': near, 'day_close': d, 'night_close': n,
+    d, n = num(day['Last']), (num(night['Last']) if night else None)
+    return {'date': d_date, 'contract': near, 'day_close': d, 'night_close': n,
             'night_vs_day': (n / d - 1) if d and n else None}
 
 
-def fetch_taifex() -> list[dict]:
-    r = requests.get('https://openapi.taifex.com.tw/v1/DailyMarketReportFut', headers=UA, timeout=60)
+def parse_taifex_csv(text: str) -> list[dict]:
+    """期交所「每日期貨行情下載」CSV → 與 taifex_night 相同欄位的 dict。"""
+    import csv
+    import io
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows:
+        return []
+    head = [h.strip() for h in rows[0]]
+    idx = {k: head.index(k) for k in ('交易日期', '契約', '到期月份(週別)', '收盤價', '交易時段')}
+    out = []
+    for r in rows[1:]:
+        if len(r) <= max(idx.values()):
+            continue
+        out.append({'Date': r[idx['交易日期']].strip().replace('/', ''), 'Contract': r[idx['契約']].strip(),
+                    'ContractMonth(Week)': r[idx['到期月份(週別)']].strip(), 'Last': r[idx['收盤價']].strip(),
+                    'TradingSession': r[idx['交易時段']].strip()})
+    return out
+
+
+def fetch_taifex(today: date | None = None) -> list[dict]:
+    """近 10 天台指期日盤與夜盤（期交所每日行情下載；OpenAPI 日報在盤前還沒有昨晚的夜盤）。"""
+    today = today or datetime.now(TPE).date()
+    r = requests.post('https://www.taifex.com.tw/cht/3/futDataDown', headers=UA, timeout=60, data={
+        'down_type': '1', 'commodity_id': 'TX',
+        'queryStartDate': f'{today - timedelta(days=10):%Y/%m/%d}', 'queryEndDate': f'{today:%Y/%m/%d}'})
     r.raise_for_status()
-    return r.json()
+    return parse_taifex_csv(r.content.decode('cp950', 'replace'))
 
 
 # ---------------- 美國行事曆 ----------------

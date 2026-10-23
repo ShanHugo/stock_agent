@@ -56,10 +56,10 @@ class OllamaNarrator:
         out = r.json()['message']['content'].strip()
         return re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip().replace('\n', ' ')
 
-    def summarize(self, text: str, has_triggered: bool = True) -> tuple[str | None, str | None]:
-        """回傳 (講評, 錯誤原因)。"""
+    def summarize(self, text: str, has_triggered: bool = True, prompt: str = PROMPT) -> tuple[str | None, str | None]:
+        """回傳 (講評, 錯誤原因)。prompt 需含 {text}。"""
         try:
-            out = self.chat(PROMPT.format(text=text))
+            out = self.chat(prompt.format(text=text))
         except Exception as e:
             return None, f'Ollama 呼叫失敗: {e}'
         bad = unsupported_numbers(out, text)
