@@ -431,6 +431,24 @@ def run_shadow(saved_main: dict | None, main: Bot, days, px, step) -> dict | Non
     return data
 
 
+def flag_lines(bot: Bot, px: pd.DataFrame, nm) -> list[str]:
+    """持股與明天要買的股票，若有「一年新高」或「外資轉賣」標記就列出（只是資訊，不影響規則）。"""
+    from src.app.lab.flags import FLAG_NAMES, stock_flags
+    buys = [o['code'] for o in bot.pending if o['side'] == 'buy']
+    codes = list(dict.fromkeys(list(bot.positions) + buys))
+    if not codes:
+        return []
+    d = px.index[-1]
+    foreign = mk.chips_panels(mk.MARKETS, px.index[-15:], codes)['foreign']
+    flags = stock_flags(px, foreign, d, codes)
+    rows = [f"- {nm(c)}（{'明天要買' if c in buys else '持股'}）：" + '、'.join(FLAG_NAMES[f] for f in flags[c])
+            for c in codes if flags.get(c)]
+    if not rows:
+        return []
+    return ['\n**參考標記**（只是資訊，不影響模擬帳戶的規則）'] + rows + [
+        '_一年新高：歷史上之後 20 天平均較強；外資轉賣：近 5 日外資連買後轉賣，歷史上之後 5 天平均較弱（幅度小於交易成本）。_']
+
+
 def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
     load_dotenv(_ROOT / '.env')
     if PAUSED.exists() and not (reset or dry_run):
@@ -526,6 +544,10 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
             seen = p.get('last_date') or p['entry_date']
             if (pd.Timestamp(bot.last_date) - pd.Timestamp(seen)).days >= 5:
                 L.append(f"  ⚠️ 自 {seen} 起沒有成交價（停牌或下市），模擬帳戶無法賣出，請自行確認這檔的狀況")
+    try:
+        L += flag_lines(bot, px, nm)
+    except Exception as e:      # noqa: BLE001 — 參考標記抓不到不影響模擬帳戶
+        print(f'[warn] 參考標記失敗：{e}')
     if shadow and shadow.get('weak') and shadow['weak'][1] is not None:
         weak, c50, ma200 = shadow['weak']
         sb = Bot.from_dict(shadow)

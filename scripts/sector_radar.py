@@ -24,6 +24,7 @@ from src.app.lab import market as mk
 from src.app.lab import radar
 from src.app.lab.constituents import members_on
 from src.app.lab.features import raw_panels
+from src.app.lab.flags import stock_flags
 from src.app.lab.themes import load_code_themes, refresh_chains
 
 STATE = _ROOT / 'state' / 'radar'
@@ -137,6 +138,7 @@ def run_daily(log) -> int:
     stocks = radar.stock_table(panels, universe, d)
     names = stock_names(ds, today)
     forward = forward_codes(d.strftime('%Y-%m-%d'))
+    flags = stock_flags(ds.prices, built['chips'].get('foreign'), d, universe)
     clean = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) else v
 
     def stock_rows(codes):
@@ -144,7 +146,8 @@ def run_daily(log) -> int:
         return [{'code': c, 'name': names.get(c, ''), 'market': mk.MARKET_NAME[built['info'][c][0]],
                  'close': clean(round(float(ds.prices.at[d, c]), 2)),
                  **{k: clean(float(r[k])) for k in radar.SHOW_FEATURES + ['score']},
-                 'rev_momentum': bool(r['rev_momentum']), 'forward': c in forward} for c, r in sub.iterrows()]
+                 'rev_momentum': bool(r['rev_momentum']), 'forward': c in forward,
+                 'flags': flags.get(c, [])} for c, r in sub.iterrows()]
 
     rows = []
     for t, r in snap.iterrows():

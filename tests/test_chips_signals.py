@@ -64,5 +64,24 @@ class TestChipSignals(unittest.TestCase):
         self.assertFalse(s['trust_big']['A'].any())
 
 
+class TestFlags(unittest.TestCase):
+    def test_new_high_and_foreign_turn(self):
+        from src.app.lab.flags import stock_flags
+        n = 300
+        idx = pd.bdate_range('2024-01-01', periods=n)
+        px = pd.DataFrame({'UP': np.linspace(50, 100, n), 'FLAT': np.r_[np.full(n - 30, 100.0), np.full(30, 90.0)]}, index=idx)
+        f = pd.DataFrame(0.0, index=idx, columns=['UP', 'FLAT'])
+        f.iloc[-8:-2, 1] = 100           # FLAT：外資連買 6 天
+        f.iloc[-2, 1] = -100             # 前一天轉賣（在近 5 日內）
+        out = stock_flags(px, f, idx[-1], ['UP', 'FLAT', 'NONE'])
+        self.assertEqual(out, {'UP': ['new_high'], 'FLAT': ['foreign_turn']})
+
+    def test_no_foreign_data(self):
+        from src.app.lab.flags import stock_flags
+        idx = pd.bdate_range('2024-01-01', periods=10)
+        px = pd.DataFrame({'A': np.arange(10.0)}, index=idx)
+        self.assertEqual(stock_flags(px, None, idx[-1], ['A']), {'A': []})   # 不滿 250 天也不算新高
+
+
 if __name__ == '__main__':
     unittest.main()

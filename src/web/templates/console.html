@@ -584,11 +584,11 @@ function renderThemeStocks(i, onlyMomentum) {
   cell.innerHTML = `<div class="rd-stocks">
     <div class="checks" style="align-items:center;gap:14px"><label class="check" style="margin:0"><input type="checkbox" ${onlyMomentum ? 'checked' : ''}
       onchange="renderThemeStocks(${i}, this.checked)"> 只看符合營收動能（${n} 檔）</label>
-      <span class="hint" style="margin:0">依個股分數排序（四項指標在全部電子股中的排名平均）。✓ 營收動能＝最近 2 個月營收都年增且站上 120 日線；★＝今天的前瞻測試名單。這是資料整理，不是買賣建議。</span></div>
+      <span class="hint" style="margin:0">依個股分數排序（四項指標在全部電子股中的排名平均）。✓ 營收動能＝最近 2 個月營收都年增且站上 120 日線；★＝今天的前瞻測試名單。▲ 一年新高＝近 20 日創 250 日新高（歷史上之後 20 天平均較強）；▼ 外資轉賣＝近 5 日外資連買後轉賣（歷史上之後 5 天平均較弱，幅度小於交易成本）。這是資料整理，不是買賣建議。</span></div>
     <div class="scroll"><table><tr><th>標記</th><th>代號</th><th>名稱</th><th>市場</th><th class="num">收盤</th><th class="num">分數</th><th class="num">營收年增</th>
       <th class="num">連 2 月年增</th><th class="num">近 20 日</th><th class="num">近 60 日</th><th class="num">站上 120 日線</th><th class="num">量能比</th>
       <th class="num">外資買超</th><th class="num">融資變化</th><th></th></tr>` +
-    (list.length ? list.map(s => `<tr><td>${s.rev_momentum ? '<span class="tag ok">✓ 營收動能</span>' : ''}${s.forward ? ' <span class="tag warn">★ 前瞻</span>' : ''}</td>
+    (list.length ? list.map(s => `<tr><td>${s.rev_momentum ? '<span class="tag ok">✓ 營收動能</span>' : ''}${s.forward ? ' <span class="tag warn">★ 前瞻</span>' : ''}${(s.flags || []).includes('new_high') ? ' <span class="tag ok">▲ 一年新高</span>' : ''}${(s.flags || []).includes('foreign_turn') ? ' <span class="tag bad">▼ 外資轉賣</span>' : ''}</td>
       <td>${esc(s.code)}</td><td>${esc(s.name)}</td><td>${esc(s.market)}</td><td class="num">${fmt(s.close)}</td><td class="num" ${heat(s.score)}>${fmt(s.score, 2)}</td>
       <td class="num ${cls(s.rev_yoy)}">${s.rev_yoy == null ? '—' : fmt(s.rev_yoy, 1) + '%'}</td><td class="num">${yes(s.rev_breadth)}</td>
       <td class="num ${cls(s.r20)}">${pct(s.r20)}</td><td class="num ${cls(s.r60)}">${pct(s.r60)}</td><td class="num">${yes(s.above_ma)}</td>
