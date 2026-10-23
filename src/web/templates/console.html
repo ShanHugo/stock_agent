@@ -65,10 +65,10 @@ section.tab { display: none; } section.tab.on { display: block; animation: fade 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 20px; }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; box-shadow: var(--shadow); }
 .kpi .l { font-size: 12.5px; color: var(--muted); font-weight: 500; letter-spacing: .02em; }
-.kpi .v { font-size: 24px; font-weight: 650; margin-top: 4px; letter-spacing: -.01em; line-height: 1.25; }
+.kpi .v { font-size: 26px; font-weight: 650; margin-top: 4px; letter-spacing: -.01em; line-height: 1.25; }
 .kpi .s { font-size: 13px; margin-top: 2px; }
 .kpi.hero { background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, #a855f7) 100%); border: 0; color: #fff; }
-.kpi.hero .l { color: rgba(255, 255, 255, .78); } .kpi.hero .v { font-size: 28px; }
+.kpi.hero .l { color: rgba(255, 255, 255, .78); } .kpi.hero .v { font-size: 32px; }
 
 /* ---------- 表格 ---------- */
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
@@ -93,7 +93,6 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 textarea { font-family: "JetBrains Mono", Consolas, "Cascadia Mono", monospace; font-size: 13px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0 14px; }
 .check { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 14px; margin: 12px 16px 0 0; }
-.check input { width: 16px; height: 16px; accent-color: var(--accent); }
 .checks { display: flex; flex-wrap: wrap; }
 .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 button.b { border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 9px 18px; border-radius: 10px; font: inherit;
@@ -105,7 +104,7 @@ button.b.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000)
 button.b.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
 button.b:disabled { opacity: .5; cursor: wait; }
 button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
-.hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.65; }
+.hint { font-size: 12.5px; color: color-mix(in srgb, var(--muted) 80%, var(--panel)); margin: 10px 0 0; line-height: 1.65; }
 .err { color: var(--bad); }
 
 /* ---------- 執行輸出、報告 ---------- */
@@ -148,6 +147,85 @@ button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
 .hold .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; }
 .hold .meta span { color: var(--muted); display: block; font-size: 11.5px; }
 
+/* ---------- 說明：ⓘ 點一下展開（手機沒有滑鼠移入，所以不用 hover tooltip） ---------- */
+.info { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 5px; margin-left: 4px; line-height: 1;
+  border-radius: 6px; vertical-align: 1px; font-weight: 400; }
+.info:hover, .show-info > .card-head .info, .show-info > h2 .info { color: var(--accent); background: var(--accent-2); }
+.info-body { display: none; font-size: 12.5px; color: var(--muted); background: var(--raised); border-radius: 10px; padding: 10px 13px; margin: 12px 0 0; line-height: 1.75; }
+.show-info > .info-body { display: block; animation: fade .15s ease-out; }
+
+/* ---------- 開關（取代核取方塊） ---------- */
+.check input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 36px; height: 21px; border-radius: 999px; background: var(--line);
+  position: relative; cursor: pointer; transition: background .2s; flex: none; margin: 0; }
+.check input[type=checkbox]::after { content: ''; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .2s; }
+.check input[type=checkbox]:checked { background: var(--accent); }
+.check input[type=checkbox]:checked::after { transform: translateX(15px); }
+
+/* ---------- 排程狀態徽章 ---------- */
+.badges { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 6px; }
+.badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); color: var(--ink-2); }
+.badge b { font-weight: 600; } .badge.ok { border-color: transparent; background: var(--good-bg); color: var(--good); }
+.badge.bad { border-color: transparent; background: var(--bad-bg); color: var(--bad); }
+
+/* ---------- 分段切換（交易與計畫） ---------- */
+.seg { display: flex; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 2px; margin-bottom: 18px;
+  overflow-x: auto; scrollbar-width: none; width: fit-content; max-width: 100%; }
+.seg::-webkit-scrollbar { display: none; }
+.seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; font-weight: 550; padding: 7px 15px; border-radius: 9px;
+  cursor: pointer; white-space: nowrap; flex: none; }
+.seg button.on { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+.subtab { display: none; } .subtab.on { display: block; animation: fade .15s ease-out; }
+.narrow { max-width: 760px; }
+
+/* ---------- 失效條件產生器 ---------- */
+.rules { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.rule { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+.rule select { width: auto; flex: 1 1 150px; background: var(--panel); }
+.rule .f { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.rule .f input { width: 84px; background: var(--panel); padding: 6px 9px; }
+.rule .x { flex: none; }
+
+/* ---------- 彈出視窗（截圖更新） ---------- */
+dialog.sheet { border: 1px solid var(--line); border-radius: 18px; padding: 0; background: var(--panel); color: var(--ink); width: min(640px, calc(100% - 32px));
+  max-height: 88vh; box-shadow: 0 24px 64px rgba(0, 0, 0, .35); }
+dialog.sheet::backdrop { background: rgba(8, 10, 14, .55); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+dialog.sheet[open] { display: flex; flex-direction: column; animation: rise .2s ease-out; }
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.sheet-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.sheet-head h2 { margin: 0; font-size: 16px; flex: 1; }
+.sheet-body { padding: 16px 20px 22px; overflow-y: auto; }
+.x { border: 0; background: var(--raised); color: var(--muted); width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 15px; line-height: 1; }
+.x:hover { color: var(--ink); }
+.paste { border: 2px dashed var(--line); border-radius: 12px; padding: 20px; text-align: center; color: var(--muted); min-height: 52px; font-size: 14px; }
+.paste:focus { outline: none; border-color: var(--accent); background: var(--accent-2); }
+
+/* ---------- 距停損：迷你進度條 ---------- */
+.gauge { display: inline-flex; align-items: center; gap: 8px; }
+.gauge .bar { width: 56px; height: 6px; border-radius: 999px; background: var(--code-bg); overflow: hidden; }
+.gauge .bar > i { display: block; height: 100%; border-radius: 999px; }
+
+/* ---------- 可清除的輸入框 ---------- */
+.clear-wrap { position: relative; display: block; } .clear-wrap input { padding-right: 34px; }
+.clear-wrap .clr { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; color: var(--muted);
+  font-size: 17px; cursor: pointer; display: none; padding: 2px 6px; line-height: 1; }
+.clear-wrap.has .clr { display: block; }
+
+/* ---------- 表格：固定第一欄、篩選標籤 ---------- */
+.sticky1 tr > :first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+.rd-detail .sticky1 tr > :first-child { background: var(--raised); }
+.fchips { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 10px; }
+.fchip { border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.fchip.on { background: var(--accent-2); color: var(--accent); border-color: transparent; font-weight: 600; }
+.kpis.mini { margin: 4px 0 16px; } .kpis.mini .kpi { box-shadow: none; background: var(--raised); padding: 12px 14px; }
+.kpis.mini .kpi .v { font-size: 19px; }
+
+/* ---------- 走勢圖：點一下或滑鼠移入顯示數字 ---------- */
+.chart { position: relative; touch-action: pan-y; }
+.chart .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12.5px; padding: 8px 11px; border-radius: 10px;
+  white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); display: none; box-shadow: 0 6px 20px rgba(0, 0, 0, .25); line-height: 1.6; z-index: 2; }
+.chart .tip b { font-weight: 650; }
+
 /* ---------- 手機 ---------- */
 @media (max-width: 720px) {
   header { flex-wrap: wrap; height: auto; padding: 10px 16px 0; gap: 6px 12px; }
@@ -162,6 +240,8 @@ button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
   .kpi.hero { grid-column: 1 / -1; } .kpi.hero .v { font-size: 26px; }
   .kpi:last-child:nth-child(even) { grid-column: 1 / -1; }   /* 主卡之後剩奇數格時，最後一格佔滿一列 */
   .hold-cards { display: block; } .hold-table { display: none; }
+  dialog.sheet { width: 100%; max-width: 100%; margin: auto 0 0; border-radius: 18px 18px 0 0; max-height: 92vh; border-bottom: 0; }
+  .seg { width: 100%; } .card-head > span[style*="margin-left:auto"] { margin-left: 0 !important; }
   .row { gap: 0; }
   .toast { left: 14px; right: 14px; bottom: 16px; max-width: none; }
 }
@@ -190,160 +270,179 @@ button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
 <section class="tab on" id="tab-overview">
   <div class="kpis" id="kpis"></div>
   <div class="card">
-    <div class="card-head"><h2 style="margin:0">持股狀態</h2>
+    <div class="card-head"><h2 style="margin:0">持股狀態<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
       <span class="hint" id="ov-time" style="margin:0"></span>
-      <button class="b" style="margin-left:auto" onclick="loadOverview(true)">重新整理</button></div>
-    <div class="scroll hold-table" style="margin-top:10px"><table id="ov-table"></table></div>
+      <span style="margin-left:auto;display:flex;gap:8px">
+        <button class="b primary" onclick="openShots()">＋ 截圖更新庫存</button>
+        <button class="b" onclick="loadOverview(true)">重新整理</button></span></div>
+    <p class="info-body">依你在 portfolio.json 設定的規則判斷；這裡只看狀態，不會推送，也不影響每天 14:30 的提醒紀錄。
+      「距停損」是收盤再跌多少會觸及停損：綠色 ≥ 10%、黃色 5～10%、紅色 &lt; 5%。</p>
+    <div class="scroll hold-table" style="margin-top:12px"><table id="ov-table"></table></div>
     <div class="hold-cards" id="ov-cards"></div>
-    <p class="hint">依你在 portfolio.json 設定的規則判斷；這裡只看狀態，不會推送，也不影響每天 14:30 的提醒紀錄。</p>
     <div id="ov-extra"></div>
   </div>
-  <div class="card">
-    <h2 style="margin:0">用截圖更新持股</h2>
-    <p class="hint">上傳券商 App 的庫存截圖（可一次選多張）。本機模型讀出股數與均價，並用截圖自己的「均價 × 股數 ≈ 總成本、股價 × 股數 ≈ 市值」驗算；
-      列出差異後由你勾選確認才寫入（寫入前自動備份）。截圖只在這台電腦處理，不會上傳到外部。</p>
-    <div id="ss-paste" contenteditable="true" inputmode="none"
-      style="border:2px dashed var(--line);border-radius:10px;padding:18px;margin-top:10px;text-align:center;color:var(--muted);min-height:48px">
-      在這裡長按 →「貼上」截圖（iPhone 截圖後選「拷貝並刪除」）；電腦可按 Ctrl+V</div>
-    <div id="ss-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
-    <div class="btns"><input type="file" id="ss-file" accept="image/*" multiple style="max-width:100%" onchange="renderThumbs()">
+</section>
+
+<dialog class="sheet" id="ss-dialog">
+  <div class="sheet-head"><h2>截圖更新庫存</h2><button class="x" onclick="$('ss-dialog').close()" aria-label="關閉">✕</button></div>
+  <div class="sheet-body show-info">
+    <div id="ss-paste" class="paste" contenteditable="true" inputmode="none"></div>
+    <div id="ss-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+    <div class="btns"><input type="file" id="ss-file" accept="image/*" multiple style="max-width:100%;background:none;border:0;padding:0" onchange="renderThumbs()">
       <button class="b primary" onclick="readShots()">讀取截圖</button></div>
     <div id="ss-out"></div>
+    <p class="info-body">本機模型讀出股數與均價，用截圖自己的「均價 × 股數 ≈ 總成本、股價 × 股數 ≈ 市值」驗算；列出差異後由你勾選才寫入（寫入前自動備份）。
+      截圖只在這台電腦處理，不會上傳到外部；截圖沒有的持股不會自動刪除。</p>
   </div>
-</section>
+</dialog>
 
 <section class="tab" id="tab-brief">
   <div class="row">
     <div class="card">
-      <h2>盤前簡報</h2>
+      <h2>盤前簡報<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+      <div class="badges" id="mb-badges"></div>
+      <p class="info-body">平日 08:30 自動推送（週末不發）。內容：隔夜美股、台指期夜盤、行事曆、族群雷達、族群新聞。產生一次約需 1～3 分鐘。</p>
       <div class="checks">
         <label class="check"><input type="checkbox" id="mb-force"> 週末也產生</label>
         <label class="check"><input type="checkbox" id="mb-nonarr"> 不用 AI 摘要</label>
       </div>
       <div class="btns">
-        <button class="b primary" onclick="runJob('morning_brief', {force: ck('mb-force'), no_narrate: ck('mb-nonarr')}, 'mb-out')">預覽</button>
-        <button class="b" onclick="runJob('morning_brief', {send: true, force: ck('mb-force'), no_narrate: ck('mb-nonarr')}, 'mb-out', '把盤前簡報推送到 Discord？')">推送到 Discord</button>
+        <button class="b" onclick="runJob('morning_brief', {force: ck('mb-force'), no_narrate: ck('mb-nonarr')}, 'mb-out')">預覽</button>
+        <button class="b primary" onclick="runJob('morning_brief', {send: true, force: ck('mb-force'), no_narrate: ck('mb-nonarr')}, 'mb-out', '把盤前簡報推送到 Discord？')">推送到 Discord</button>
       </div>
-      <p class="hint">排程：平日 08:30 自動推送。產生一次約需 1～3 分鐘。</p>
       <div id="mb-out"></div>
     </div>
     <div class="card">
-      <h2>持股提醒</h2>
+      <h2>持股提醒<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+      <div class="badges" id="ca-badges"></div>
+      <p class="info-body">平日 14:30 自動檢查，有觸發才推送。注意：預覽也會記錄「今天已檢查」，之後排程同一天不會重複通知。</p>
       <div class="checks">
         <label class="check"><input type="checkbox" id="ca-force" checked> 已檢查過也重新判斷</label>
-        <label class="check"><input type="checkbox" id="ca-test"> 沒有提醒也輸出狀態摘要</label>
+        <label class="check"><input type="checkbox" id="ca-test"> 沒有提醒也輸出摘要</label>
         <label class="check"><input type="checkbox" id="ca-nonarr"> 不用 AI 摘要</label>
       </div>
       <div class="btns">
-        <button class="b primary" onclick="runJob('check_alerts', {force: ck('ca-force'), test: ck('ca-test'), no_narrate: ck('ca-nonarr')}, 'ca-out')">預覽</button>
-        <button class="b" onclick="runJob('check_alerts', {send: true, force: ck('ca-force'), test: ck('ca-test'), no_narrate: ck('ca-nonarr')}, 'ca-out', '把持股提醒推送到 Discord？')">推送到 Discord</button>
+        <button class="b" onclick="runJob('check_alerts', {force: ck('ca-force'), test: ck('ca-test'), no_narrate: ck('ca-nonarr')}, 'ca-out')">預覽</button>
+        <button class="b primary" onclick="runJob('check_alerts', {send: true, force: ck('ca-force'), test: ck('ca-test'), no_narrate: ck('ca-nonarr')}, 'ca-out', '把持股提醒推送到 Discord？')">推送到 Discord</button>
       </div>
-      <p class="hint">排程：平日 14:30 自動檢查，有觸發才推送。注意：預覽也會記錄「今天已檢查」，之後排程同一天不會重複通知。</p>
       <div id="ca-out"></div>
     </div>
   </div>
 </section>
 
 <section class="tab" id="tab-trade">
-  <div class="row">
-    <div class="card">
-      <h2>記錄買賣</h2>
-      <div class="grid">
-        <div><label>買賣</label><select id="rt-side"><option value="buy">買進</option><option value="sell">賣出</option></select></div>
-        <div><label>代號</label><input id="rt-symbol" placeholder="0050、2330、VOO"></div>
-        <div><label>股數（可零股／碎股）</label><input id="rt-qty" inputmode="decimal"></div>
-        <div><label>成交價（美股為美元）</label><input id="rt-price" inputmode="decimal"></div>
-        <div><label>成交日（空白 = 今天）</label><input id="rt-date" type="date"></div>
-        <div><label>名稱（新持股才需要）</label><input id="rt-name"></div>
-      </div>
-      <div class="checks">
-        <label class="check"><input type="checkbox" id="rt-etf"> 美股 ETF</label>
-        <label class="check"><input type="checkbox" id="rt-noplan"> 個股不套用計畫（不建議）</label>
-      </div>
-      <div class="btns"><button class="b primary" onclick="recordTrade()">記錄</button></div>
-      <p class="hint">股數與成交均價會自動更新；個股買進會套用交易計畫，超出可買股數或風險預算會警告。</p>
-      <div id="rt-out"></div>
-    </div>
-    <div class="card">
-      <h2>個股交易計畫（買前）</h2>
-      <div class="grid">
-        <div><label>代號</label><input id="pn-symbol" placeholder="2317"></div>
-        <div><label>停損價</label><input id="pn-stop" inputmode="decimal"></div>
-        <div><label>預計買價（空白 = 最近收盤）</label><input id="pn-entry" inputmode="decimal"></div>
-        <div><label>停利價（選填）</label><input id="pn-target" inputmode="decimal"></div>
-      </div>
-      <label>買進理由</label><input id="pn-thesis" maxlength="200" placeholder="例：AI 伺服器出貨成長">
-      <label>失效條件（每行一個）</label>
-      <textarea id="pn-invalid" rows="3" placeholder="below_ma:60&#10;revenue_yoy_below:0:2&#10;time_stop:60:0.05"></textarea>
-      <p class="hint">close_below:價格、below_ma:天數、time_stop:天數:最低報酬、revenue_yoy_below:年增率%:連續月數</p>
-      <div class="btns">
-        <button class="b primary" onclick="newPlan()">建立計畫並計算可買股數</button>
-        <button class="b" onclick="runJob('plan_list', {all: false}, 'pn-out')">列出計畫</button>
-      </div>
-      <div id="pn-out"></div>
-    </div>
+  <div class="seg" id="trade-seg">
+    <button data-sub="plan" class="on">① 交易計畫（買前）</button>
+    <button data-sub="record">② 記錄買賣</button>
+    <button data-sub="hold">③ 確認理由／取消</button>
+    <button data-sub="review">④ 交易檢討</button>
   </div>
-  <div class="row">
-    <div class="card">
-      <h2>確認持股理由／取消計畫</h2>
-      <div class="grid">
-        <div><label>持股代號</label><input id="pr-symbol"></div>
-        <div><label>計畫 ID</label><input id="pc-id"></div>
-      </div>
-      <div class="btns">
-        <button class="b" onclick="runJob('plan_review', {symbol: val('pr-symbol')}, 'pr-out', '確認 ' + val('pr-symbol') + ' 的持股理由仍成立？')">理由仍成立</button>
-        <button class="b danger" onclick="runJob('plan_cancel', {plan_id: val('pc-id')}, 'pr-out', '取消計畫 ' + val('pc-id') + '？')">取消待執行計畫</button>
-      </div>
-      <div id="pr-out"></div>
+
+  <div class="subtab on" id="sub-plan"><div class="card narrow">
+    <h2>個股交易計畫（買前）<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+    <p class="info-body">買個股前先寫下理由、停損與失效條件，系統依 portfolio.json 的 risk 設定算出最多能買幾股。之後記錄買進時會自動套用這份計畫。</p>
+    <div class="grid">
+      <div><label>代號</label><input id="pn-symbol" class="clearable" list="codes" placeholder="2317" autocomplete="off"></div>
+      <div><label>停損價</label><input id="pn-stop" class="clearable" inputmode="decimal"></div>
+      <div><label>預計買價（空白 = 最近收盤）</label><input id="pn-entry" class="clearable" inputmode="decimal"></div>
+      <div><label>停利價（選填）</label><input id="pn-target" class="clearable" inputmode="decimal"></div>
     </div>
-    <div class="card">
-      <h2>交易檢討</h2>
-      <div class="grid"><div><label>月份</label><input id="rv-month" type="month"></div></div>
-      <div class="checks"><label class="check"><input type="checkbox" id="rv-all"> 統計全部紀錄</label></div>
-      <div class="btns">
-        <button class="b primary" onclick="runJob('review_trades', {month: val('rv-month'), all: ck('rv-all')}, 'rv-out')">產生</button>
-        <button class="b" onclick="runJob('review_trades', {month: val('rv-month'), all: ck('rv-all'), send: true}, 'rv-out', '把交易檢討推送到 Discord？')">推送到 Discord</button>
-      </div>
-      <div id="rv-out"></div>
+    <label>買進理由</label><input id="pn-thesis" class="clearable" maxlength="200" placeholder="例：AI 伺服器出貨成長">
+    <label>失效條件（出現任一個，理由就不成立）</label>
+    <div class="rules" id="pn-rules"></div>
+    <div class="btns" style="margin-top:8px"><button class="b mini" onclick="addRule()">＋ 新增條件</button></div>
+    <details style="margin-top:12px"><summary class="hint" style="cursor:pointer">進階：直接編輯語法</summary>
+      <textarea id="pn-invalid" rows="3" style="margin-top:8px" placeholder="below_ma:60&#10;revenue_yoy_below:0:2&#10;time_stop:60:0.05"></textarea>
+      <p class="hint">上面的條件會自動寫到這裡；也可以直接改。語法：close_below:價格、below_ma:天數、time_stop:天數:最低報酬、revenue_yoy_below:年增率%:連續月數</p>
+    </details>
+    <div class="btns">
+      <button class="b primary" onclick="newPlan()">建立計畫並計算可買股數</button>
+      <button class="b" onclick="runJob('plan_list', {all: false}, 'pn-out')">列出計畫</button>
     </div>
-  </div>
+    <div id="pn-out"></div>
+  </div></div>
+
+  <div class="subtab" id="sub-record"><div class="card narrow">
+    <h2>記錄買賣<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+    <p class="info-body">股數與成交均價會自動更新；個股買進會套用交易計畫，超出可買股數或風險預算會警告；賣出會寫入交易日誌（R 倍數、出場方式）供每月檢討。定期定額或校正股數也可以用「持股總覽 → 截圖更新庫存」。</p>
+    <div class="grid">
+      <div><label>買賣</label><select id="rt-side"><option value="buy">買進</option><option value="sell">賣出</option></select></div>
+      <div><label>代號</label><input id="rt-symbol" class="clearable" list="codes" placeholder="0050、2330、VOO" autocomplete="off"></div>
+      <div><label>股數（可零股／碎股）</label><input id="rt-qty" class="clearable" inputmode="decimal"></div>
+      <div><label>成交價（美股為美元）</label><input id="rt-price" class="clearable" inputmode="decimal"></div>
+      <div><label>成交日（空白 = 今天）</label><input id="rt-date" type="date"></div>
+      <div><label>名稱（新持股才需要）</label><input id="rt-name" class="clearable"></div>
+    </div>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="rt-etf"> 美股 ETF</label>
+      <label class="check"><input type="checkbox" id="rt-noplan"> 個股不套用計畫（不建議）</label>
+    </div>
+    <div class="btns"><button class="b primary" onclick="recordTrade()">記錄</button></div>
+    <div id="rt-out"></div>
+  </div></div>
+
+  <div class="subtab" id="sub-hold"><div class="card narrow">
+    <h2>確認持股理由／取消計畫<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+    <p class="info-body">持股理由定期確認仍成立時按「理由仍成立」，持股提醒就不會再催你確認；還沒買進的計畫可以用計畫 ID 取消（「列出計畫」可看到 ID）。</p>
+    <div class="grid">
+      <div><label>持股代號</label><input id="pr-symbol" class="clearable" list="codes" autocomplete="off"></div>
+      <div><label>計畫 ID</label><input id="pc-id" class="clearable"></div>
+    </div>
+    <div class="btns">
+      <button class="b primary" onclick="runJob('plan_review', {symbol: val('pr-symbol')}, 'pr-out', '確認 ' + val('pr-symbol') + ' 的持股理由仍成立？')">理由仍成立</button>
+      <button class="b danger" onclick="runJob('plan_cancel', {plan_id: val('pc-id')}, 'pr-out', '取消計畫 ' + val('pc-id') + '？')">取消待執行計畫</button>
+    </div>
+    <div id="pr-out"></div>
+  </div></div>
+
+  <div class="subtab" id="sub-review"><div class="card narrow">
+    <h2>交易檢討</h2>
+    <div class="grid"><div><label>月份</label><input id="rv-month" type="month"></div></div>
+    <div class="checks"><label class="check"><input type="checkbox" id="rv-all"> 統計全部紀錄</label></div>
+    <div class="btns">
+      <button class="b primary" onclick="runJob('review_trades', {month: val('rv-month'), all: ck('rv-all')}, 'rv-out')">產生</button>
+      <button class="b" onclick="runJob('review_trades', {month: val('rv-month'), all: ck('rv-all'), send: true}, 'rv-out', '把交易檢討推送到 Discord？')">推送到 Discord</button>
+    </div>
+    <div id="rv-out"></div>
+  </div></div>
 </section>
 
 <section class="tab" id="tab-research">
   <div class="card">
-    <h2>個股研究卡</h2>
-    <div class="grid" style="grid-template-columns: 1fr"><div><label>股票代號（空白或逗號分隔，最多 10 個；目前只支援上市公司）</label><input id="rc-codes" placeholder="2330 2317"></div></div>
+    <h2>個股研究卡<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+    <p class="info-body">只陳述數據、不給買賣結論。第一次查一檔約需 2 分鐘回補歷史，之後讀快取。選股研究正在下載資料時會暫停使用，避免被證交所封鎖。目前只支援上市公司。</p>
+    <div class="grid" style="grid-template-columns: 1fr"><div><label>股票代號（空白或逗號分隔，最多 10 個）</label><input id="rc-codes" class="clearable" list="codes" placeholder="2330 2317" autocomplete="off"></div></div>
     <div class="btns">
       <button class="b primary" onclick="runJob('research_card', {codes: val('rc-codes')}, 'rc-out')">產生</button>
       <button class="b" onclick="runJob('research_card', {watchlist: true}, 'rc-out')">觀察清單＋持有個股</button>
       <button class="b" onclick="runJob('research_card', {codes: val('rc-codes'), send: true}, 'rc-out', '產生並推送到 Discord？')">產生並推送</button>
     </div>
-    <p class="hint">只陳述數據、不給買賣結論。第一次查一檔約需 2 分鐘回補歷史，之後讀快取。選股研究正在下載資料時會暫停使用，避免被證交所封鎖。</p>
     <div id="rc-out"></div>
   </div>
   <div class="card">
     <h2>觀察清單</h2>
     <p class="hint" style="margin-top:0">公布新月營收時，每日提醒會通知你。</p>
     <div class="chips" id="wl-chips"></div>
-    <div class="btns"><input id="wl-add" placeholder="輸入代號後按新增" style="max-width:220px"><button class="b" onclick="addWatch()">新增</button></div>
+    <div class="btns"><input id="wl-add" list="codes" autocomplete="off" placeholder="輸入代號後按新增" style="max-width:220px"><button class="b" onclick="addWatch()">新增</button></div>
   </div>
 </section>
 
 <section class="tab" id="tab-lab">
   <div class="card">
-    <div class="card-head"><h2 style="margin:0">族群雷達</h2>
+    <div class="card-head"><h2 style="margin:0">族群雷達<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
       <span class="hint" id="rd-time" style="margin:0"></span>
       <span style="margin-left:auto" class="btns"><button class="b" style="margin:0" onclick="runJob('sector_radar', {}, 'rd-out')">重新計算</button></span></div>
-    <p class="hint">記憶體、面板、IC 設計等族群（依櫃買中心產業價值鏈分類），依「營收年增、近 60 日漲跌、量能、融資增減」四項的跨族群排名平均排序；數字為族群成分股的中位數或比例。排名是資料整理，不是買賣建議。</p>
+    <p class="info-body">記憶體、面板、IC 設計等族群（依櫃買中心產業價值鏈分類），依「營收年增、近 60 日漲跌、量能、融資增減」四項的跨族群排名平均排序；數字為族群成分股的中位數或比例。
+      點族群可展開成分股。t 值絕對值大於 2 才算有統計意義。排名是資料整理，不是買賣建議。</p>
     <div id="rd-bt"></div>
-    <div class="scroll"><table id="rd-table"></table></div>
+    <div class="scroll sticky1"><table id="rd-table"></table></div>
     <div id="rd-out"></div>
   </div>
   <div class="card">
-    <div class="card-head"><h2 style="margin:0">前瞻測試：營收動能・營收年增最高 20 檔</h2>
+    <div class="card-head"><h2 style="margin:0">前瞻測試：營收年增最高 20 檔<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
       <span class="hint" id="fw-time" style="margin:0"></span>
       <span style="margin-left:auto" class="btns" ><button class="b" style="margin:0" onclick="runJob('forward_test', {}, 'fw-out')">立即記錄並評估</button></span></div>
-    <p class="hint">每個交易日收盤後記下符合規則的名單（只新增、不修改），之後用真實的 5 天、20 天後股價，扣一次來回成本，與同期 0050 比較。這是驗證規則用的紀錄，不是買賣建議；到期筆數少時，結果主要是運氣。</p>
+    <p class="info-body">每個交易日收盤後記下符合營收動能規則的名單（只新增、不修改），之後用真實的 5 天、20 天後股價，扣一次來回成本，與同期 0050 比較。這是驗證規則用的紀錄，不是買賣建議；到期筆數少時，結果主要是運氣。</p>
     <div id="fw-summary"></div>
     <details style="margin-top:10px"><summary class="hint" id="fw-picks-title">最新名單</summary><div class="scroll"><table id="fw-picks"></table></div></details>
     <div id="fw-out"></div>
@@ -375,7 +474,7 @@ button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
 <section class="tab" id="tab-paper">
   <div class="card" id="pp-status-card">
     <div class="card-head">
-      <h2 style="margin:0">模擬帳戶：營收動能</h2>
+      <h2 style="margin:0">模擬帳戶：營收動能<button class="info" onclick="info(this)" aria-label="規則">ⓘ</button></h2>
       <span id="pp-state"></span>
       <span class="hint" id="pp-time" style="margin:0"></span>
       <span style="margin-left:auto" class="btns">
@@ -383,14 +482,14 @@ button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
         <button class="b" style="margin:0" id="pp-pause" onclick="togglePause()"></button>
       </span>
     </div>
-    <p class="hint" id="pp-rules"></p>
+    <p class="info-body" id="pp-rules"></p>
     <div id="pp-out"></div>
   </div>
   <div class="kpis" id="pp-kpis"></div>
   <div class="card"><div class="md" id="pp-scorecard"><p class="hint">還沒有成績單。每個月第一個交易日收盤後自動產生。</p></div></div>
   <div class="card">
     <h2>淨值走勢（同樣起始資金放 0050 比較）</h2>
-    <div id="pp-chart"></div>
+    <div id="pp-chart" class="chart"></div>
   </div>
   <div class="row">
     <div class="card"><h2>下一個交易日 09:30 要執行</h2><div class="scroll"><table id="pp-pending"></table></div></div>
@@ -403,16 +502,16 @@ button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
 <section class="tab" id="tab-settings">
   <div class="row">
     <div class="card">
-      <h2>排程</h2>
+      <h2>排程<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+      <p class="info-body">排程由 scripts\register_tasks.ps1 以系統管理員身分建立；停用請執行該腳本加 -Disable。console 是開機就啟動的操作台。</p>
       <div class="scroll"><table id="st-tasks"></table></div>
-      <p class="hint">排程由 scripts\register_tasks.ps1 建立；停用請執行該腳本加 -Disable。</p>
       <h2 style="margin-top:18px">最近排程輸出</h2>
       <label>盤前簡報 logs\morning_brief.log</label><div class="md"><pre id="st-log-mb"></pre></div>
       <label>持股提醒 logs\check_alerts.log</label><div class="md"><pre id="st-log-ca"></pre></div>
     </div>
     <div class="card">
-      <h2>portfolio.json</h2>
-      <p class="hint" style="margin-top:0">持股、提醒規則、風險設定、觀察清單。儲存前會檢查格式與規則，舊版自動備份到 state\portfolio_backups\。欄位說明見 src\app\alerts\portfolio.py。</p>
+      <h2>portfolio.json<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+      <p class="info-body" style="margin-bottom:12px">持股、提醒規則、風險設定、觀察清單。儲存前會檢查格式與規則，舊版自動備份到 state\portfolio_backups\。欄位說明見 src\app\alerts\portfolio.py。</p>
       <textarea id="pf-text" rows="24" spellcheck="false"></textarea>
       <div class="btns"><button class="b primary" onclick="savePortfolio()">儲存</button><button class="b" onclick="loadPortfolio()">還原為目前檔案</button></div>
       <div id="pf-msg" class="hint"></div>
@@ -421,6 +520,7 @@ button.b.mini { padding: 4px 11px; font-size: 13px; border-radius: 8px; }
 </section>
 </main>
 <div class="toast" id="toast"></div>
+<datalist id="codes"></datalist>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -430,6 +530,39 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const fmt = (v, d = 2) => v == null || isNaN(v) ? '—' : Number(v).toLocaleString('zh-TW', {minimumFractionDigits: d, maximumFractionDigits: d});
 const pct = (v, d = 1) => v == null || isNaN(v) ? '—' : (v > 0 ? '+' : '') + (v * 100).toFixed(d) + '%';
 const cls = v => v > 0 ? 'up' : v < 0 ? 'down' : '';          // 台股習慣：紅漲綠跌（狀態好壞用 .pos／.neg）
+
+function info(btn) { btn.closest('.card, .sheet-body').classList.toggle('show-info'); }
+
+// 可清除的輸入框（右側 ×）
+function clearable(root = document) {
+  root.querySelectorAll('input.clearable:not([data-cw])').forEach(inp => {
+    inp.dataset.cw = '1';
+    const w = document.createElement('span'); w.className = 'clear-wrap';
+    inp.parentNode.insertBefore(w, inp); w.appendChild(inp);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'clr'; b.textContent = '×'; b.setAttribute('aria-label', '清除');
+    b.onclick = () => { inp.value = ''; w.classList.remove('has'); inp.focus(); };
+    w.appendChild(b);
+    const upd = () => w.classList.toggle('has', !!inp.value);
+    inp.addEventListener('input', upd); upd();
+  });
+}
+// 代號自動完成：持股＋觀察清單
+async function loadCodes() {
+  try {
+    const p = JSON.parse((await api('/api/portfolio')).text);
+    const opts = new Map();
+    for (const h of p.holdings || []) opts.set(h.symbol.split('.')[0], h.name || '持股');
+    for (const c of p.watchlist || []) if (!opts.has(c)) opts.set(c, '觀察清單');
+    $('codes').innerHTML = [...opts].map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join('');
+  } catch (_) {}
+}
+// 距停損迷你進度條：越長越安全；< 5% 紅、5～10% 黃
+function gauge(dist) {
+  if (dist == null) return '—';
+  const c = dist < 0.05 ? 'var(--bad)' : dist < 0.10 ? 'var(--warn)' : 'var(--good)';
+  return `<span class="gauge"><span class="bar"><i style="width:${Math.max(4, Math.min(100, dist / 0.3 * 100))}%;background:${c}"></i></span>${(dist * 100).toFixed(1)}%</span>`;
+}
+const shortTime = t => { const m = String(t || '').match(/(\d{1,2})\/(\d{1,2})\/\d{4}\s+(\d{1,2}):(\d{2})/); return m ? `${m[1]}/${m[2]} ${m[3].padStart(2, '0')}:${m[4]}` : (t || '—'); };
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 5000); }
 
@@ -441,7 +574,7 @@ async function api(path, opts = {}) {
 }
 
 // ---------- 分頁 ----------
-const loaders = {overview: () => loadOverview(), lab: () => { loadRadar(); loadForward(); loadReports(); loadProgress(); }, settings: () => { loadStatus(); loadPortfolio(); }, paper: () => loadPaper(), research: () => loadWatch()};
+const loaders = {brief: () => loadBriefStatus(), overview: () => loadOverview(), lab: () => { loadRadar(); loadForward(); loadReports(); loadProgress(); }, settings: () => { loadStatus(); loadPortfolio(); }, paper: () => loadPaper(), research: () => loadWatch()};
 $('nav').addEventListener('click', e => {
   const tab = e.target.dataset.tab; if (!tab) return;
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
@@ -506,6 +639,38 @@ async function pollJob(id, out) {
   }
 }
 
+$('trade-seg').addEventListener('click', e => {
+  const sub = e.target.dataset.sub; if (!sub) return;
+  document.querySelectorAll('#trade-seg button').forEach(b => b.classList.toggle('on', b.dataset.sub === sub));
+  document.querySelectorAll('#tab-trade .subtab').forEach(x => x.classList.toggle('on', x.id === 'sub-' + sub));
+  e.target.scrollIntoView({block: 'nearest', inline: 'center', behavior: 'smooth'});
+});
+
+// 失效條件產生器：下拉選單＋數字，自動寫成語法（進階可直接改語法）
+const RULES = {
+  below_ma: {label: '收盤跌破均線', fields: [['天數', 60]], code: v => `below_ma:${v[0]}`},
+  close_below: {label: '收盤跌破價格', fields: [['價格', '']], code: v => `close_below:${v[0]}`},
+  time_stop: {label: '持有太久沒漲', fields: [['天數', 60], ['報酬低於 %', 5]], code: v => `time_stop:${v[0]}:${+(v[1] / 100).toFixed(4)}`},
+  revenue_yoy_below: {label: '營收年增低於', fields: [['門檻 %', 0], ['連續月數', 2]], code: v => `revenue_yoy_below:${v[0]}:${v[1]}`},
+};
+function addRule(kind = 'below_ma') {
+  const row = document.createElement('div'); row.className = 'rule';
+  row.innerHTML = `<select onchange="ruleKind(this)">${Object.entries(RULES).map(([k, r]) => `<option value="${k}" ${k === kind ? 'selected' : ''}>${r.label}</option>`).join('')}</select>
+    <span class="fs"></span><button type="button" class="x" onclick="this.parentNode.remove(); syncRules()" aria-label="刪除">✕</button>`;
+  $('pn-rules').appendChild(row); ruleKind(row.querySelector('select'));
+}
+function ruleKind(sel) {
+  const r = RULES[sel.value];
+  sel.parentNode.querySelector('.fs').innerHTML = r.fields.map(([l, d]) => `<span class="f">${l}<input inputmode="decimal" value="${d}" oninput="syncRules()"></span>`).join(' ');
+  syncRules();
+}
+function syncRules() {
+  $('pn-invalid').value = [...document.querySelectorAll('#pn-rules .rule')].map(row => {
+    const r = RULES[row.querySelector('select').value], v = [...row.querySelectorAll('.f input')].map(i => i.value.trim());
+    return v.every(x => x !== '') ? r.code(v) : '';
+  }).filter(Boolean).join('\n');
+}
+
 function recordTrade() {
   const side = val('rt-side'), sym = val('rt-symbol').toUpperCase();
   const p = {side, symbol: sym, qty: val('rt-qty'), price: val('rt-price'), date: val('rt-date'), name: val('rt-name'), etf: ck('rt-etf'), no_plan: ck('rt-noplan')};
@@ -538,6 +703,7 @@ function shrink(file, max = 1600) {
     img.src = URL.createObjectURL(file);
   });
 }
+function openShots() { $('ss-dialog').showModal(); renderThumbs(); }
 let ssPasted = [];                  // 貼上的截圖（不用存進相簿）
 const PASTE_HINT = '在這裡長按 →「貼上」截圖（iPhone 截圖後選「拷貝並刪除」）；電腦可按 Ctrl+V';
 $('ss-paste').addEventListener('paste', e => {
@@ -551,6 +717,7 @@ $('ss-paste').addEventListener('input', () => { $('ss-paste').textContent = PAST
 function shotFiles() { return [...ssPasted, ...$('ss-file').files]; }
 function renderThumbs() {
   const files = shotFiles();
+  if (!$('ss-paste')) return;
   $('ss-paste').textContent = ssPasted.length ? `已貼上 ${ssPasted.length} 張，可以繼續貼` : PASTE_HINT;
   $('ss-thumbs').innerHTML = files.map((f, i) => `<div style="position:relative">
       <img src="${URL.createObjectURL(f)}" style="height:72px;border-radius:6px;border:1px solid var(--line)">
@@ -619,16 +786,16 @@ async function loadOverview(refresh = false) {
         <span class="pnl ${cls(e.unrealized_pct)}">${rate ? (pnl > 0 ? '+' : '') + fmt(pnl, 0) : '—'}<br><small>${pct(e.unrealized_pct)}</small></span></div>
       <div class="meta"><div><span>收盤 ${e.date.slice(5)}</span>${fmt(e.close)}</div><div><span>股數</span>${fmt(e.shares, e.shares % 1 ? 4 : 0)}</div>
         <div><span>成本</span>${fmt(e.cost)}</div><div><span>停損價</span>${e.stop_level ? fmt(e.stop_level) : '未設'}</div>
-        <div><span>距停損</span>${dist == null ? '—' : (dist * 100).toFixed(1) + '%'}</div><div><span>停利價</span>${e.target_level ? fmt(e.target_level) : '—'}</div></div></div>`);
+        <div><span>距停損</span>${gauge(dist)}</div><div><span>停利價</span>${e.target_level ? fmt(e.target_level) : '—'}</div></div></div>`);
     return `<tr><td><strong>${esc(e.symbol)}</strong> ${esc(e.label.replace(e.symbol, '').trim())}</td><td><span class="tag ${kc}">${kt}</span></td>
       <td class="num">${fmt(e.close)} <small class="hint">${e.date.slice(5)}</small></td><td class="num">${fmt(e.shares, e.shares % 1 ? 4 : 0)}</td>
       <td class="num">${fmt(e.cost)}</td><td class="num ${cls(e.unrealized_pct)}">${pct(e.unrealized_pct)}</td>
       <td class="num ${cls(pnl)}">${rate ? fmt(pnl, 0) : '—'}</td><td class="num">${rate ? fmt(value, 0) : '—'}</td>
-      <td class="num">${e.stop_level ? fmt(e.stop_level) : '未設'}</td><td class="num">${dist == null ? '—' : (dist * 100).toFixed(1) + '%'}</td>
+      <td class="num">${e.stop_level ? fmt(e.stop_level) : '未設'}</td><td class="num">${gauge(dist)}</td>
       <td class="num">${e.target_level ? fmt(e.target_level) : '—'}</td></tr>`;
   });
   $('ov-table').innerHTML = `<tr><th>持股</th><th>狀態</th><th class="num">收盤</th><th class="num">股數</th><th class="num">成本</th><th class="num">未實現</th>
-    <th class="num">損益（台幣）</th><th class="num">市值（台幣）</th><th class="num">停損價</th><th class="num">再跌多少觸及停損</th><th class="num">停利價</th></tr>` + rows.join('');
+    <th class="num">損益（台幣）</th><th class="num">市值（台幣）</th><th class="num">停損價</th><th class="num">距停損</th><th class="num">停利價</th></tr>` + rows.join('');
   $('ov-cards').innerHTML = cards.join('');
   const alerts = ev.filter(e => e.kind !== 'OK').length;
   const kpi = (l, v, s = '', hero = false) => `<div class="kpi${hero ? ' hero' : ''}"><div class="l">${l}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`;
@@ -680,7 +847,34 @@ function lineChart(points, series) {
     ${ticks.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${P.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${Math.round(v).toLocaleString()}</text>`).join('')}
     ${xt.map(i => `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">${points[i].date.slice(5)}</text>`).join('')}
     ${series.map(s => `<polyline fill="none" stroke="${s.color}" stroke-width="2" points="${points.map((p, i) => p[s.key] == null ? '' : `${x(i)},${y(p[s.key])}`).join(' ')}"/>`).join('')}
-  </svg><div class="hint" style="display:flex;gap:16px">${series.map(s => `<span><span style="display:inline-block;width:14px;height:3px;background:${s.color};vertical-align:middle"></span> ${s.label}</span>`).join('')}</div>`;
+    <line class="guide" y1="${P.t}" y2="${H - P.b}" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/>
+    ${series.map((s, k) => `<circle class="pt" data-k="${k}" r="4" fill="${s.color}" stroke="var(--panel)" stroke-width="2" visibility="hidden"/>`).join('')}
+    <rect class="hit" x="${P.l}" y="0" width="${W - P.l - P.r}" height="${H}" fill="transparent"/>
+  </svg><div class="tip"></div><div class="hint" style="display:flex;gap:16px">${series.map(s => `<span><span style="display:inline-block;width:14px;height:3px;background:${s.color};vertical-align:middle"></span> ${s.label}</span>`).join('')}</div>`;
+}
+function bindChart(el, points, series) {
+  const svg = el.querySelector('svg'); if (!svg) return;
+  const W = 900, H = 260, P = {l: 56, r: 12, t: 12, b: 28};
+  const vals = points.flatMap(p => series.map(s => p[s.key]).filter(v => v != null));
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || hi * 0.02; lo -= pad; hi += pad;
+  const x = i => P.l + i * (W - P.l - P.r) / (points.length - 1), y = v => P.t + (hi - v) * (H - P.t - P.b) / (hi - lo);
+  const tip = el.querySelector('.tip'), guide = svg.querySelector('.guide'), dots = svg.querySelectorAll('.pt');
+  const show = e => {
+    const r = svg.getBoundingClientRect(), k = r.width / W;
+    const i = Math.max(0, Math.min(points.length - 1, Math.round(((e.clientX - r.left) / k - P.l) / ((W - P.l - P.r) / (points.length - 1)))));
+    const p = points[i];
+    guide.setAttribute('x1', x(i)); guide.setAttribute('x2', x(i)); guide.setAttribute('visibility', 'visible');
+    dots.forEach(d => { const v = p[series[d.dataset.k].key]; if (v == null) return d.setAttribute('visibility', 'hidden');
+      d.setAttribute('cx', x(i)); d.setAttribute('cy', y(v)); d.setAttribute('visibility', 'visible'); });
+    const [a, b] = series.map(s => p[s.key]), diff = a != null && b != null ? a - b : null;
+    tip.innerHTML = `${esc(p.date)}<br>${series.map(s => `${s.label.split('（')[0]} <b>${fmt(p[s.key], 0)}</b>`).join('<br>')}`
+      + (diff == null ? '' : `<br>差距 <b>${diff > 0 ? '+' : ''}${fmt(diff, 0)}</b>（${pct(b ? a / b - 1 : null)}）`);
+    tip.style.display = 'block';
+    const left = Math.max(70, Math.min(r.width - 70, x(i) * k));
+    tip.style.left = left + 'px'; tip.style.top = Math.max(60, y(Math.max(a ?? -Infinity, b ?? -Infinity)) * k) + 'px';
+  };
+  const hide = () => { tip.style.display = 'none'; guide.setAttribute('visibility', 'hidden'); dots.forEach(d => d.setAttribute('visibility', 'hidden')); };
+  svg.addEventListener('pointermove', show); svg.addEventListener('pointerdown', show); svg.addEventListener('pointerleave', hide);
 }
 async function loadPaper() {
   let d; try { d = await api('/api/paper'); } catch (e) { $('pp-rules').innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
@@ -705,16 +899,20 @@ async function loadPaper() {
     ['現金／持股市值', `${fmt(v.cash, 0)}／${fmt(value, 0)}`],
     ['完成交易', s.closed_trades ? `${s.closed_trades} 筆，勝率 ${Math.round(s.win_rate * 100)}%` : '尚無'],
   ].map(([l, x]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${x}</div></div>`).join('');
-  $('pp-chart').innerHTML = lineChart(v.curve, [{key: 'equity', label: '模擬帳戶', color: 'var(--accent)'}, {key: 'bench', label: '0050（同樣起始資金）', color: 'var(--muted)'}]);
+  const series = [{key: 'equity', label: '模擬帳戶', color: 'var(--accent)'}, {key: 'bench', label: '0050（同樣起始資金）', color: 'var(--muted)'}];
+  $('pp-chart').innerHTML = lineChart(v.curve, series);
+  bindChart($('pp-chart'), v.curve, series);
   const name = x => `${esc(x.code)} ${esc(x.name || '')}`;
   $('pp-pending').innerHTML = v.pending.length ? '<tr><th>動作</th><th>股票</th><th class="num">股數</th><th class="num">參考收盤</th><th class="num">停損約</th><th>理由</th></tr>' +
     v.pending.map(o => `<tr><td><span class="tag ${SIDE[o.side][1]}">${SIDE[o.side][0]}</span></td><td>${name(o)}</td><td class="num">${o.shares}</td>
       <td class="num">${fmt(o.ref_price)}</td><td class="num">${o.stop_est ? fmt(o.stop_est) : '—'}</td><td style="white-space:normal">${esc(o.reason)}</td></tr>`).join('')
     : '<tr><td class="hint">沒有待執行的單</td></tr>';
-  $('pp-positions').innerHTML = v.positions.length ? '<tr><th>股票</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">報酬</th><th class="num">停損</th><th>買進日</th></tr>' +
+  $('pp-positions').innerHTML = v.positions.length ? '<tr><th>股票</th><th class="num">現價／成本</th><th class="num">報酬</th><th class="num">停損</th></tr>' +
     v.positions.map(p => { const last = p.last || p.entry, stale = p.last_date && (new Date(v.last_date) - new Date(p.last_date)) / 864e5 >= 5;
-      return `<tr><td>${name(p)}${stale ? ' <span class="tag bad">多日無成交價</span>' : ''}</td><td class="num">${p.shares}</td><td class="num">${fmt(p.entry)}</td><td class="num">${fmt(last)}</td>
-      <td class="num ${cls(last / p.entry - 1)}">${pct(last / p.entry - 1)}</td><td class="num">${fmt(p.stop)}</td><td>${esc(p.entry_date)}</td></tr>`; }).join('')
+      return `<tr><td style="white-space:normal">${name(p)}${stale ? ' <span class="tag bad">多日無成交價</span>' : ''}
+        <div class="hint" style="margin:2px 0 0">${p.shares} 股・${esc(String(p.entry_date).slice(5).replace('-', '/'))} 買進</div></td>
+      <td class="num">${fmt(last)}<div class="hint" style="margin:2px 0 0">${fmt(p.entry)}</div></td>
+      <td class="num ${cls(last / p.entry - 1)}">${pct(last / p.entry - 1)}</td><td class="num">${fmt(p.stop)}</td></tr>`; }).join('')
     : '<tr><td class="hint">目前沒有持股</td></tr>';
   $('pp-trades').innerHTML = v.trades.length ? '<tr><th>日期</th><th>動作</th><th>股票</th><th class="num">股數</th><th class="num">價格</th><th class="num">金額</th><th class="num">費用</th><th class="num">損益</th><th>說明</th></tr>' +
     v.trades.map(t => `<tr><td>${esc(t.date)}</td><td><span class="tag ${(SIDE[t.side] || ['', 'warn'])[1]}">${(SIDE[t.side] || [t.side])[0]}</span></td><td>${name(t)}</td>
@@ -748,17 +946,22 @@ async function loadRadar() {
   if (!d.exists) { $('rd-table').innerHTML = '<tr><td class="hint">還沒有資料。按「重新計算」產生。</td></tr>'; return; }
   $('rd-time').textContent = `${d.date} 收盤，更新於 ${d.updated.replace('T', ' ').slice(0, 16)}`;
   const bt = d.backtest && d.backtest['20'];
-  $('rd-bt').innerHTML = bt ? `<p class="hint">歷史驗證（${bt.periods} 期，每 20 天換一次）：前 3 名族群每期平均比 0050 <strong class="${cls(bt.top_vs_bench)}">${pct(bt.top_vs_bench, 2)}</strong>（t 值 ${bt.top_vs_bench_t.toFixed(2)}，贏的期數 ${Math.round(bt.top_beats_bench * 100)}%）；
-     比後 3 名 ${pct(bt.top_vs_bottom, 2)}（t 值 ${bt.top_vs_bottom_t.toFixed(2)}）。t 值絕對值大於 2 才算有統計意義。完整報告見下方「${esc(d.backtest.report)}」。</p>` : '';
+  const sig = t => Math.abs(t) >= 2 ? '<span class="tag ok">有統計意義</span>' : '<span class="tag">不顯著</span>';
+  $('rd-bt').innerHTML = bt ? `<div class="kpis mini">
+      <div class="kpi"><div class="l">前 3 名每 20 天比 0050</div><div class="v ${cls(bt.top_vs_bench)}">${pct(bt.top_vs_bench, 2)}</div></div>
+      <div class="kpi"><div class="l">統計顯著度（t 值）</div><div class="v">${bt.top_vs_bench_t.toFixed(2)}</div><div class="s">${sig(bt.top_vs_bench_t)}</div></div>
+      <div class="kpi"><div class="l">贏 0050 的期數</div><div class="v">${Math.round(bt.top_beats_bench * 100)}%</div><div class="s hint" style="margin:2px 0 0">共 ${bt.periods} 期</div></div>
+      <div class="kpi"><div class="l">前 3 名比後 3 名</div><div class="v ${cls(bt.top_vs_bottom)}">${pct(bt.top_vs_bottom, 2)}</div><div class="s">${sig(bt.top_vs_bottom_t)}</div></div>
+    </div>` : '';
   radarData = d;
-  $('rd-table').innerHTML = `<tr><th></th><th>排名</th><th>族群</th><th class="num">檔數</th><th class="num">分數</th><th class="num">營收年增</th><th class="num">連 2 月年增</th>
+  $('rd-table').innerHTML = `<tr><th>族群</th><th class="num">檔數</th><th class="num">分數</th><th class="num">營收年增</th><th class="num">連 2 月年增</th>
     <th class="num">近 20 日</th><th class="num">近 60 日</th><th class="num">站上 120 日線</th><th class="num">量能比</th><th class="num">外資買超</th><th class="num">融資變化</th></tr>` +
     d.rows.map((r, i) => `<tr class="rd-row" data-i="${i}" onclick="toggleTheme(${i})" title="點擊展開成分股">
-      <td><span class="arrow" id="rd-arrow-${i}">▶</span></td><td>${r.rank}</td><td><strong>${esc(r.theme)}</strong></td><td class="num">${r.members}</td><td class="num" ${heat(r.score)}>${fmt(r.score, 2)}</td>
+      <td><span class="arrow" id="rd-arrow-${i}">▶</span> <span class="hint" style="margin:0 4px 0 0">${r.rank}</span><strong>${esc(r.theme)}</strong></td><td class="num">${r.members}</td><td class="num" ${heat(r.score)}>${fmt(r.score, 2)}</td>
       <td class="num ${cls(r.rev_yoy)}">${fmt(r.rev_yoy, 1)}%</td><td class="num">${Math.round(r.rev_breadth * 100)}%</td>
       <td class="num ${cls(r.r20)}">${pct(r.r20)}</td><td class="num ${cls(r.r60)}">${pct(r.r60)}</td><td class="num">${Math.round(r.above_ma * 100)}%</td>
       <td class="num">${fmt(r.vratio, 2)}</td><td class="num ${cls(r.foreign20)}">${fmt(r.foreign20, 2)}</td><td class="num ${cls(r.margin20)}">${fmt(r.margin20, 2)}</td></tr>
-      <tr class="rd-detail" id="rd-detail-${i}" hidden><td colspan="13"></td></tr>`).join('');
+      <tr class="rd-detail" id="rd-detail-${i}" hidden><td colspan="11"></td></tr>`).join('');
 }
 let radarData = null;
 const heat = v => v == null ? '' : `style="background: color-mix(in srgb, var(--accent) ${Math.round(v * 35)}%, transparent)"`;
@@ -768,27 +971,33 @@ function toggleTheme(i) {
   const row = $('rd-detail-' + i), open = row.hidden;
   row.hidden = !open;
   $('rd-arrow-' + i).textContent = open ? '▼' : '▶';
-  if (open && !row.dataset.done) { renderThemeStocks(i, false); row.dataset.done = '1'; }
+  if (open && !row.dataset.done) { renderThemeStocks(i); row.dataset.done = '1'; }
 }
-function renderThemeStocks(i, onlyMomentum) {
-  const r = radarData.rows[i], cell = $('rd-detail-' + i).firstElementChild;
-  const list = (r.stocks || []).filter(s => !onlyMomentum || s.rev_momentum);
-  const n = (r.stocks || []).filter(s => s.rev_momentum).length;
-  cell.innerHTML = `<div class="rd-stocks">
-    <div class="checks" style="align-items:center;gap:14px"><label class="check" style="margin:0"><input type="checkbox" ${onlyMomentum ? 'checked' : ''}
-      onchange="renderThemeStocks(${i}, this.checked)"> 只看符合營收動能（${n} 檔）</label>
-      <span class="hint" style="margin:0">依個股分數排序（四項指標在全部電子股中的排名平均）。✓ 營收動能＝最近 2 個月營收都年增且站上 120 日線；★＝今天的前瞻測試名單。▲ 一年新高＝近 20 日創 250 日新高（歷史上之後 20 天平均較強）；▼ 外資轉賣＝近 5 日外資連買後轉賣（歷史上之後 5 天平均較弱，幅度小於交易成本）。這是資料整理，不是買賣建議。</span></div>
-    <div class="scroll"><table><tr><th>標記</th><th>代號</th><th>名稱</th><th>市場</th><th class="num">收盤</th><th class="num">分數</th><th class="num">營收年增</th>
+const FILTERS = {mom: ['✓ 營收動能', s => s.rev_momentum], high: ['▲ 一年新高', s => (s.flags || []).includes('new_high')],
+                 fwd: ['★ 前瞻名單', s => s.forward], noturn: ['排除 ▼ 外資轉賣', s => !(s.flags || []).includes('foreign_turn')]};
+const themeFilters = {};
+function toggleFilter(i, k) { const f = themeFilters[i] ||= new Set(); f.has(k) ? f.delete(k) : f.add(k); renderThemeStocks(i); }
+function renderThemeStocks(i) {
+  const r = radarData.rows[i], cell = $('rd-detail-' + i).firstElementChild, on = themeFilters[i] || new Set();
+  const all = r.stocks || [], list = all.filter(s => [...on].every(k => FILTERS[k][1](s)));
+  const chips = Object.entries(FILTERS).map(([k, [label, fn]]) =>
+    `<button class="fchip ${on.has(k) ? 'on' : ''}" onclick="event.stopPropagation(); toggleFilter(${i}, '${k}')">${label}${k === 'noturn' ? '' : `（${all.filter(fn).length}）`}</button>`).join('');
+  cell.innerHTML = `<div class="rd-stocks show-info">
+    <div class="fchips">${chips}<span class="hint" style="margin:0 0 0 auto">${list.length}／${all.length} 檔</span></div>
+    <div class="scroll sticky1"><table><tr><th>股票</th><th>標記</th><th>市場</th><th class="num">收盤</th><th class="num">分數</th><th class="num">營收年增</th>
       <th class="num">連 2 月年增</th><th class="num">近 20 日</th><th class="num">近 60 日</th><th class="num">站上 120 日線</th><th class="num">量能比</th>
       <th class="num">外資買超</th><th class="num">融資變化</th><th></th></tr>` +
-    (list.length ? list.map(s => `<tr><td>${s.rev_momentum ? '<span class="tag ok">✓ 營收動能</span>' : ''}${s.forward ? ' <span class="tag warn">★ 前瞻</span>' : ''}${(s.flags || []).includes('new_high') ? ' <span class="tag ok">▲ 一年新高</span>' : ''}${(s.flags || []).includes('foreign_turn') ? ' <span class="tag bad">▼ 外資轉賣</span>' : ''}</td>
-      <td>${esc(s.code)}</td><td>${esc(s.name)}</td><td>${esc(s.market)}</td><td class="num">${fmt(s.close)}</td><td class="num" ${heat(s.score)}>${fmt(s.score, 2)}</td>
+    (list.length ? list.map(s => `<tr><td><strong>${esc(s.code)}</strong> ${esc(s.name)}</td>
+      <td>${s.rev_momentum ? '<span class="tag ok">✓ 營收動能</span>' : ''}${s.forward ? ' <span class="tag warn">★ 前瞻</span>' : ''}${(s.flags || []).includes('new_high') ? ' <span class="tag ok">▲ 一年新高</span>' : ''}${(s.flags || []).includes('foreign_turn') ? ' <span class="tag bad">▼ 外資轉賣</span>' : ''}</td>
+      <td>${esc(s.market)}</td><td class="num">${fmt(s.close)}</td><td class="num" ${heat(s.score)}>${fmt(s.score, 2)}</td>
       <td class="num ${cls(s.rev_yoy)}">${s.rev_yoy == null ? '—' : fmt(s.rev_yoy, 1) + '%'}</td><td class="num">${yes(s.rev_breadth)}</td>
       <td class="num ${cls(s.r20)}">${pct(s.r20)}</td><td class="num ${cls(s.r60)}">${pct(s.r60)}</td><td class="num">${yes(s.above_ma)}</td>
       <td class="num">${fmt(s.vratio, 2)}</td><td class="num ${cls(s.foreign20)}">${fmt(s.foreign20, 2)}</td><td class="num ${cls(s.margin20)}">${fmt(s.margin20, 2)}</td>
       <td>${s.market === '上市' ? `<button class="b mini" onclick="event.stopPropagation(); openCard('${esc(s.code)}')">研究卡</button>`
         : '<button class="b mini" disabled title="研究卡目前只支援上市公司">研究卡</button>'}</td></tr>`).join('')
-      : '<tr><td colspan="15" class="hint">沒有符合條件的個股</td></tr>') + '</table></div></div>';
+      : '<tr><td colspan="14" class="hint">沒有符合條件的個股</td></tr>') + `</table></div>
+    <p class="hint">依個股分數排序（四項指標在全部電子股中的排名平均）。✓ 營收動能＝最近 2 個月營收都年增且站上 120 日線；★＝今天的前瞻測試名單；
+      ▲ 一年新高＝近 20 日創 250 日新高（歷史上之後 20 天平均較強）；▼ 外資轉賣＝近 5 日外資連買後轉賣（歷史上之後 5 天平均較弱，幅度小於交易成本）。這是資料整理，不是買賣建議。</p></div>`;
 }
 function openCard(code) {
   document.querySelector('nav button[data-tab="research"]').click();
@@ -843,6 +1052,7 @@ async function openReport(name, btn) {
 // ---------- 設定 ----------
 async function loadStatus() {
   const d = await api('/api/status').catch(e => ({error: e.message}));
+  if (!d.error) { statusCache = d; if ($('tab-brief').classList.contains('on')) loadBriefStatus(); }
   if (d.error) { $('st-tasks').innerHTML = `<tr><td class="err">${esc(d.error)}</td></tr>`; return; }
   $('st-tasks').innerHTML = '<tr><th>工作</th><th>狀態</th><th>上次執行</th><th>結果</th><th>下次執行</th></tr>' + (d.tasks.length ? d.tasks.map(t =>
     `<tr><td>${esc(t.name)}</td><td>${t.state === 'Ready' ? '<span class="tag ok">已啟用</span>' : `<span class="tag warn">${esc(t.state)}</span>`}</td>
@@ -851,6 +1061,17 @@ async function loadStatus() {
   $('st-log-ca').textContent = d.logs.check_alerts.join('\n') || '（尚無紀錄）';
   $('envbar').innerHTML = `<span title="Discord ${d.discord_configured ? '已設定' : '未設定'}"><i class="dot ${d.discord_configured ? 'ok' : 'bad'}"></i>Discord</span>
     <span title="${d.ollama ? 'Ollama：' + esc(d.ollama_model) : 'Ollama 未啟動'}"><i class="dot ${d.ollama ? 'ok' : 'bad'}"></i>本機模型</span>`;
+}
+let statusCache = null;
+async function loadBriefStatus() {
+  const d = statusCache || await api('/api/status').catch(() => null);
+  if (!d || !d.tasks) return;
+  for (const [id, name] of [['mb-badges', 'morning_brief'], ['ca-badges', 'check_alerts']]) {
+    const t = d.tasks.find(x => x.name === name);
+    $(id).innerHTML = !t ? '<span class="badge bad">找不到排程</span>'
+      : `<span class="badge ${t.result === 0 ? 'ok' : 'bad'}">上次 <b>${esc(shortTime(t.last))}</b> ${t.result === 0 ? '成功' : '失敗'}</span>`
+        + `<span class="badge">下次 <b>${esc(shortTime(t.next))}</b></span>` + (t.state === 'Ready' ? '' : `<span class="badge bad">${esc(t.state)}</span>`);
+  }
 }
 async function loadPortfolio() {
   const d = await api('/api/portfolio'); $('pf-text').value = d.text;
@@ -864,7 +1085,7 @@ async function savePortfolio() {
 }
 
 // ---------- 啟動 ----------
-loadStatus();
+loadStatus(); loadCodes(); clearable(); renderThumbs();
 let first = 'overview'; try { first = localStorage.getItem('tab') || 'overview'; } catch (_) {}
 (document.querySelector(`nav button[data-tab="${first}"]`) || document.querySelector('nav button')).click();
 </script>
