@@ -1,4 +1,5 @@
-﻿# 在這台電腦建立每日排程（工作日 08:30 盤前簡報、09:30 模擬帳戶成交、14:30 收盤後檢查、16:30 前瞻測試、16:45 族群雷達、16:50 模擬帳戶）。
+﻿# 在這台電腦建立每日排程（工作日 08:30 盤前簡報、09:30 模擬帳戶成交、14:30 收盤後檢查、16:30 前瞻測試、16:45 族群雷達、16:50 模擬帳戶），
+# 以及開機就啟動的操作台（console，給手機透過 Tailscale 使用）。
 # 以 S4U 方式執行：不論是否登入 Windows 都會跑，且不需要儲存密碼（需以系統管理員身分執行本腳本）。
 # 用法（PowerShell，在專案根目錄）：  powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
 # 停用：  powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -Disable
@@ -9,7 +10,10 @@ $wrapper = Join-Path $root 'scripts\run_scheduled.cmd'
 $tasks = @(@{Name = 'morning_brief'; At = '08:30'}, @{Name = 'paper_exec'; At = '09:30'}, @{Name = 'check_alerts'; At = '14:30'}, @{Name = 'forward_test'; At = '16:30'}, @{Name = 'sector_radar'; At = '16:45'}, @{Name = 'paper_bot'; At = '16:50'})
 
 if ($Disable) {
-    foreach ($t in $tasks) { Disable-ScheduledTask -TaskPath '\stock_agent\' -TaskName $t.Name -ErrorAction SilentlyContinue | Out-Null }
+    foreach ($n in @($tasks.Name) + 'console') {
+        Stop-ScheduledTask -TaskPath '\stock_agent\' -TaskName $n -ErrorAction SilentlyContinue
+        Disable-ScheduledTask -TaskPath '\stock_agent\' -TaskName $n -ErrorAction SilentlyContinue | Out-Null
+    }
     Get-ScheduledTask -TaskPath '\stock_agent\' -ErrorAction SilentlyContinue | ForEach-Object { '{0}  {1}' -f $_.TaskName, $_.State }
     return
 }
@@ -26,6 +30,15 @@ foreach ($t in $tasks) {
     $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At $t.At
     Register-ScheduledTask -TaskPath '\stock_agent\' -TaskName $t.Name -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'stock_agent' -Force | Out-Null
 }
+
+# 操作台：開機就啟動、一直執行（手機透過 Tailscale 連回來用）。只聽 127.0.0.1，由 tailscale serve 轉進來。
+$py = Join-Path $root '.venv\Scripts\python.exe'
+$consoleSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskPath '\stock_agent\' -TaskName 'console' -Description 'stock_agent' -Force `
+    -Action (New-ScheduledTaskAction -Execute $py -Argument '-m src.web.console' -WorkingDirectory $root) `
+    -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $consoleSettings -Principal $principal | Out-Null
+Start-ScheduledTask -TaskPath '\stock_agent\' -TaskName 'console' -ErrorAction SilentlyContinue
 Get-ScheduledTask -TaskPath '\stock_agent\' | ForEach-Object {
     $i = $_ | Get-ScheduledTaskInfo
     '{0}  state={1}  next={2}' -f $_.TaskName, $_.State, $i.NextRunTime

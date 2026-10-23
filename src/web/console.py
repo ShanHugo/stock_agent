@@ -31,6 +31,17 @@ PROGRESS = re.compile(r'^\[(twse|tpex)\] (\S+) (\S+) \((\d+)/(\d+)\)')
 app = FastAPI(title='台股操作台', docs_url=None, redoc_url=None)
 jobs = JobManager()
 _overview_cache: dict = {}
+# 只回應「寫給本機或你自己 Tailscale 網路」的請求。操作台沒有登入，這可擋住惡意網頁透過 DNS rebinding
+# 冒用瀏覽器連到 127.0.0.1:8765（例如偷改 portfolio.json 或觸發推送）。
+ALLOWED_HOST = re.compile(r'^(127\.0\.0\.1|localhost|\[::1\]|[\w-]+\.[\w-]+\.ts\.net)(:\d+)?$', re.I)
+
+
+@app.middleware('http')
+async def check_host(request, call_next):
+    from fastapi.responses import PlainTextResponse
+    if not ALLOWED_HOST.match(request.headers.get('host', '')):
+        return PlainTextResponse('不接受這個主機名稱的請求', status_code=403)
+    return await call_next(request)
 
 
 def _no_window():
@@ -142,6 +153,69 @@ def put_portfolio(body: PortfolioText):
     if errors:
         raise HTTPException(400, '設定有誤，未儲存：' + '；'.join(errors))
     return {'saved': True, 'backup': _save_portfolio(raw)}
+
+
+class Screenshot(BaseModel):
+    image: str                  # data URL 或純 base64（瀏覽器端已縮小）
+
+
+class HoldingChanges(BaseModel):
+    changes: list[dict]
+
+
+@app.post('/api/holdings/screenshot')
+def read_screenshot(body: Screenshot):
+    """讀截圖、交叉驗算、與 portfolio.json 比對；不寫入。"""
+    from src.app.alerts import screenshot as ss
+    if not PORTFOLIO.exists():
+        raise HTTPException(404, '找不到 portfolio.json')
+    b64 = body.image.split(',', 1)[-1]
+    if len(b64) > 12_000_000:
+        raise HTTPException(400, '圖片太大')
+    try:
+        rows = ss.read_image(b64, os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'), os.getenv('OLLAMA_URL', 'http://localhost:11434'))
+    except Exception as e:      # noqa: BLE001
+        raise HTTPException(502, f'本機模型讀圖失敗（Ollama 有開嗎？）：{e}')
+    if not rows:
+        raise HTTPException(422, '截圖中沒有讀到任何持股')
+    raw = json.loads(PORTFOLIO.read_text(encoding='utf-8'))
+    return {'rows': rows, 'changes': ss.diff(raw.get('holdings', []), rows)}
+
+
+def _tw_symbol(code: str) -> str:
+    """新持股的代號：上市直接用代號，上櫃加 .TWO（看最近一個交易日的官方行情）；美股照原樣。"""
+    if not code[:1].isdigit():
+        return code
+    from datetime import date, timedelta
+    from src.app.lab import market as mk
+    for k in range(10):
+        d = date.today() - timedelta(days=k)
+        try:
+            tw, two = mk.quotes_day('twse', d), mk.quotes_day('tpex', d)
+        except Exception:       # noqa: BLE001
+            continue
+        if tw.empty and two.empty:
+            continue
+        return code if code in set(tw['code']) or code not in set(two['code']) else f'{code}.TWO'
+    return code
+
+
+@app.post('/api/holdings/apply')
+def apply_holdings(body: HoldingChanges):
+    """寫入勾選的變更（先重新驗算一次，有問題的不寫）。"""
+    from src.app.alerts import screenshot as ss
+    raw = json.loads(PORTFOLIO.read_text(encoding='utf-8'))
+    accepted = [c for c in body.changes if c.get('kind') in ('update', 'new')]
+    for c in accepted:
+        if c.get('shares') is None or c.get('cost') is None or float(c['shares']) <= 0 or float(c['cost']) <= 0:
+            raise HTTPException(400, f"{c.get('code')} 的股數或均價不正確")
+    notes = ss.apply(raw, accepted, _tw_symbol)
+    if not notes:
+        return {'saved': False, 'notes': []}
+    errors = _check_portfolio(raw)
+    if errors:
+        raise HTTPException(400, '更新後的設定有誤，未儲存：' + '；'.join(errors))
+    return {'saved': True, 'notes': notes, 'backup': _save_portfolio(raw)}
 
 
 class Watchlist(BaseModel):

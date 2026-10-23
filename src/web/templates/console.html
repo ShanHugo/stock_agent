@@ -108,6 +108,14 @@ button.b.mini { padding: 3px 10px; font-size: 13px; }
     <p class="hint">依你在 portfolio.json 設定的規則判斷；這裡只看狀態，不會推送，也不影響每天 14:30 的提醒紀錄。</p>
     <div id="ov-extra"></div>
   </div>
+  <div class="card">
+    <h2 style="margin:0">用截圖更新持股</h2>
+    <p class="hint">上傳券商 App 的庫存截圖（可一次選多張）。本機模型讀出股數與均價，並用截圖自己的「均價 × 股數 ≈ 總成本、股價 × 股數 ≈ 市值」驗算；
+      列出差異後由你勾選確認才寫入（寫入前自動備份）。截圖只在這台電腦處理，不會上傳到外部。</p>
+    <div class="btns"><input type="file" id="ss-file" accept="image/*" multiple style="max-width:100%">
+      <button class="b primary" onclick="readShots()">讀取截圖</button></div>
+    <div id="ss-out"></div>
+  </div>
 </section>
 
 <section class="tab" id="tab-brief">
@@ -417,6 +425,66 @@ function newPlan() {
 // ---------- 總覽 ----------
 const KIND = {OK: ['正常', 'ok'], NEAR_STOP: ['接近停損', 'warn'], NEAR_TARGET: ['接近停利', 'warn'], STOP_LOSS: ['觸發停損', 'bad'],
               TRAILING_STOP: ['觸發移動停損', 'bad'], TAKE_PROFIT: ['觸發停利', 'bad'], PLAN_INVALID: ['計畫失效', 'bad']};
+// ---------- 截圖更新持股 ----------
+let ssChanges = [];
+function shrink(file, max = 1600) {
+  // 手機截圖常是 3000px 以上：先在瀏覽器縮小再上傳，讀圖更快
+  return new Promise((ok, bad) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      ok(c.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = () => bad(new Error('無法讀取圖片'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+async function readShots() {
+  const files = [...$('ss-file').files];
+  if (!files.length) { toast('請先選擇截圖'); return; }
+  const out = $('ss-out');
+  const merged = new Map();          // Map 保留順序（一般物件會把 2330 這種數字代號排到前面）
+  for (const [i, f] of files.entries()) {
+    out.innerHTML = `<p class="hint">讀取第 ${i + 1}／${files.length} 張（每張約 5～20 秒）…</p>`;
+    try {
+      const r = await api('/api/holdings/screenshot', {method: 'POST', body: JSON.stringify({image: await shrink(f)})});
+      // 多張截圖：同一檔以後讀到的為準；「截圖沒有」只在所有截圖都沒有時才列出
+      for (const c of r.changes) if (c.kind !== 'absent' || !merged.has(c.code)) merged.set(c.code, c);
+    } catch (e) { out.innerHTML = `<p class="err">第 ${i + 1} 張：${esc(e.message)}</p>`; return; }
+  }
+  ssChanges = [...merged.values()];
+  const label = {same: '<span class="tag ok">相同</span>', update: '<span class="tag warn">變更</span>', new: '<span class="tag warn">新增</span>',
+                 absent: '<span class="tag">截圖沒有</span>'};
+  const row = (c, i) => {
+    const can = (c.kind === 'update' || c.kind === 'new') && !c.problems.length;
+    const before = c.old_shares == null ? '—' : `${c.old_shares} 股 @ ${fmt(c.old_cost)}`;
+    const after = c.kind === 'absent' ? '（可能在另一張截圖或已賣出，不會自動刪除）' : `${c.shares} 股 @ ${fmt(c.cost)}`;
+    // 手機上不能左右捲動才看得到數字：每檔一列，前後對照放在同一格
+    return `<tr><td style="width:28px">${can ? `<input type="checkbox" id="ss-ck-${i}" checked>` : ''}</td>
+      <td style="white-space:normal">${label[c.kind]} <b>${esc(c.code)}</b> ${esc(c.name || '')}
+        <div class="hint" style="margin:4px 0 0">目前：${before}</div><div style="margin-top:2px">截圖：${after}</div>
+        ${c.problems.length ? `<div class="err" style="margin-top:2px">${c.problems.map(esc).join('<br>')}</div>` : ''}</td></tr>`;
+  };
+  const n = ssChanges.filter(c => (c.kind === 'update' || c.kind === 'new') && !c.problems.length).length;
+  out.innerHTML = `<table style="width:100%">${ssChanges.map(row).join('')}</table>` +
+    (n ? `<div class="btns"><button class="b primary" onclick="applyShots()">寫入勾選的 ${n} 筆</button></div>`
+       : '<p class="hint">沒有需要更新的持股（有驗算問題的請重新截圖：畫面要清楚、不要裁到數字）。</p>');
+}
+async function applyShots() {
+  const picked = ssChanges.filter((c, i) => $('ss-ck-' + i) && $('ss-ck-' + i).checked);
+  if (!picked.length) { toast('沒有勾選任何一筆'); return; }
+  if (!confirm(`寫入 ${picked.length} 筆持股變更？（舊的 portfolio.json 會自動備份）`)) return;
+  try {
+    const r = await api('/api/holdings/apply', {method: 'POST', body: JSON.stringify({changes: picked})});
+    $('ss-out').innerHTML = `<p>已更新：</p><ul>${r.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul><p class="hint">備份：${esc(r.backup || '')}</p>`;
+    loadOverview(true);
+  } catch (e) { toast(e.message); }
+}
+
 async function loadOverview(refresh = false) {
   $('ov-time').textContent = '讀取最新收盤價中…';
   let d; try { d = await api('/api/overview' + (refresh ? '?refresh=1' : '')); }

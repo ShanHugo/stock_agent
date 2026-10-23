@@ -67,7 +67,7 @@ class TestConsoleApi(unittest.TestCase):
             p.start()
         (d / 'reports').mkdir()
         (d / 'reports' / 'a.md').write_text('# 報告', encoding='utf-8')
-        self.client = TestClient(console.app)
+        self.client = TestClient(console.app, base_url='http://127.0.0.1:8765')
 
     def tearDown(self):
         for p in self.patches:
@@ -96,6 +96,25 @@ class TestConsoleApi(unittest.TestCase):
         r = self.client.put('/api/watchlist', json={'codes': ['2330', '2317', '2330']})
         self.assertEqual(r.json()['watchlist'], ['2330', '2317'])
         self.assertEqual(self.client.put('/api/watchlist', json={'codes': ['abc;']}).status_code, 400)
+
+    def test_host_allowlist(self):
+        bad = TestClient(console.app, base_url='http://evil.example.com')
+        self.assertEqual(bad.get('/api/portfolio').status_code, 403)
+        ts = TestClient(console.app, base_url='https://desktop.tail1234.ts.net')
+        self.assertEqual(ts.get('/api/portfolio').status_code, 200)
+
+    def test_screenshot_read_then_apply(self):
+        rows = [{'code': '0050', 'name': '元大', 'price': 106.9, 'avg_cost': 87.76, 'shares': 204,
+                 'total_cost': 17919, 'market_value': 21799}]
+        with mock.patch('src.app.alerts.screenshot.read_image', return_value=rows):
+            r = self.client.post('/api/holdings/screenshot', json={'image': 'data:image/jpeg;base64,AAAA'})
+        ch = r.json()['changes']
+        self.assertEqual((ch[0]['kind'], ch[0]['old_shares'], ch[0]['shares'], ch[0]['problems']), ('update', 10, 204, []))
+        self.assertEqual(json.loads(self.pf.read_text(encoding='utf-8'))['holdings'][0]['shares'], 10)   # 讀圖不寫入
+        r = self.client.post('/api/holdings/apply', json={'changes': ch})
+        self.assertTrue(r.json()['saved'])
+        h = json.loads(self.pf.read_text(encoding='utf-8'))['holdings'][0]
+        self.assertEqual((h['shares'], h['cost']), (204, 87.76))
 
     def test_job_rejects_unknown_kind(self):
         with mock.patch.object(console, 'external_lab_running', return_value=False):
