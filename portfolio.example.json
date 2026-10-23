@@ -10,7 +10,7 @@
   },
   "fees": {
     "TW": {
-      "fee_bps": 2.8
+      "fee_bps": 3.99
     },
     "US": {
       "fee_bps": 10

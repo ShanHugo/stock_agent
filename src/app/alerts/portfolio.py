@@ -23,7 +23,7 @@
   near_threshold         距離停損/停利價多少以內發「接近」提醒，預設 0.02
   drawdown_window_days   回落的「高點」取最近幾個交易日，預設 252（約一年）
   allocation             {"targets": {"TW": 0.5, "US": 0.5}, "threshold": 0.05}
-  fees                   覆寫賣出費用（bps），例 {"TW": {"fee_bps": 2.8}, "US": {"fee_bps": 10}}
+  fees                   覆寫賣出費用（bps），例 {"TW": {"fee_bps": 3.99}, "US": {"fee_bps": 10}}（3.99 = 0.1425% × 2.8 折）
   risk                   部位控管參數（見 plans.py）
   watchlist              觀察中的上市個股代號，例 ["2317", "2454"]（研究卡與月營收公布提醒）
 """
