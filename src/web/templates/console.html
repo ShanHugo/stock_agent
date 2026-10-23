@@ -112,7 +112,11 @@ button.b.mini { padding: 3px 10px; font-size: 13px; }
     <h2 style="margin:0">用截圖更新持股</h2>
     <p class="hint">上傳券商 App 的庫存截圖（可一次選多張）。本機模型讀出股數與均價，並用截圖自己的「均價 × 股數 ≈ 總成本、股價 × 股數 ≈ 市值」驗算；
       列出差異後由你勾選確認才寫入（寫入前自動備份）。截圖只在這台電腦處理，不會上傳到外部。</p>
-    <div class="btns"><input type="file" id="ss-file" accept="image/*" multiple style="max-width:100%">
+    <div id="ss-paste" contenteditable="true" inputmode="none"
+      style="border:2px dashed var(--line);border-radius:10px;padding:18px;margin-top:10px;text-align:center;color:var(--muted);min-height:48px">
+      在這裡長按 →「貼上」截圖（iPhone 截圖後選「拷貝並刪除」）；電腦可按 Ctrl+V</div>
+    <div id="ss-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+    <div class="btns"><input type="file" id="ss-file" accept="image/*" multiple style="max-width:100%" onchange="renderThumbs()">
       <button class="b primary" onclick="readShots()">讀取截圖</button></div>
     <div id="ss-out"></div>
   </div>
@@ -443,8 +447,27 @@ function shrink(file, max = 1600) {
     img.src = URL.createObjectURL(file);
   });
 }
+let ssPasted = [];                  // 貼上的截圖（不用存進相簿）
+const PASTE_HINT = '在這裡長按 →「貼上」截圖（iPhone 截圖後選「拷貝並刪除」）；電腦可按 Ctrl+V';
+$('ss-paste').addEventListener('paste', e => {
+  e.preventDefault();
+  const imgs = [...(e.clipboardData?.items || [])].filter(it => it.type.startsWith('image/')).map(it => it.getAsFile()).filter(Boolean);
+  if (!imgs.length) { toast('剪貼簿裡沒有圖片：截圖後要選「拷貝並刪除」或「拷貝」'); return; }
+  ssPasted.push(...imgs);
+  renderThumbs();
+});
+$('ss-paste').addEventListener('input', () => { $('ss-paste').textContent = PASTE_HINT; });   // 擋掉貼上的文字
+function shotFiles() { return [...ssPasted, ...$('ss-file').files]; }
+function renderThumbs() {
+  const files = shotFiles();
+  $('ss-paste').textContent = ssPasted.length ? `已貼上 ${ssPasted.length} 張，可以繼續貼` : PASTE_HINT;
+  $('ss-thumbs').innerHTML = files.map((f, i) => `<div style="position:relative">
+      <img src="${URL.createObjectURL(f)}" style="height:72px;border-radius:6px;border:1px solid var(--line)">
+      ${i < ssPasted.length ? `<button class="b mini" style="position:absolute;top:2px;right:2px;padding:0 6px" onclick="ssPasted.splice(${i},1);renderThumbs()">✕</button>` : ''}
+    </div>`).join('');
+}
 async function readShots() {
-  const files = [...$('ss-file').files];
+  const files = shotFiles();
   if (!files.length) { toast('請先選擇截圖'); return; }
   const out = $('ss-out');
   const merged = new Map();          // Map 保留順序（一般物件會把 2330 這種數字代號排到前面）
@@ -480,6 +503,7 @@ async function applyShots() {
   if (!confirm(`寫入 ${picked.length} 筆持股變更？（舊的 portfolio.json 會自動備份）`)) return;
   try {
     const r = await api('/api/holdings/apply', {method: 'POST', body: JSON.stringify({changes: picked})});
+    ssPasted = []; $('ss-file').value = ''; renderThumbs();
     $('ss-out').innerHTML = `<p>已更新：</p><ul>${r.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul><p class="hint">備份：${esc(r.backup || '')}</p>`;
     loadOverview(true);
   } catch (e) { toast(e.message); }
