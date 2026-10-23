@@ -162,8 +162,8 @@ class SignalResult:
 
 
 def evaluate(signals: dict[str, pd.DataFrame], px: pd.DataFrame, open_: pd.DataFrame, member: pd.DataFrame,
-             benchmark: pd.Series, *, start: str, horizons=HORIZONS) -> list[SignalResult]:
-    """member：布林面板，d 日該股是否在當時的選股範圍內。"""
+             benchmark: pd.Series, *, start: str, end: str | None = None, horizons=HORIZONS) -> list[SignalResult]:
+    """member：布林面板，d 日該股是否在當時的選股範圍內。end：訊號日的最後一天（出場可以在 end 之後）。"""
     out = []
     raw_gap = open_.shift(-1) / px - 1          # 隔天開盤相對今天收盤
     for h in horizons:
@@ -172,7 +172,8 @@ def evaluate(signals: dict[str, pd.DataFrame], px: pd.DataFrame, open_: pd.DataF
         base = fwd.where(valid).mean(axis=1)                     # 同期全體等權重
         excess = fwd.sub(base, axis=0)
         bench = benchmark.shift(-h) / benchmark.shift(-1) - 1     # 0050 同期（收盤到收盤近似）
-        days = px.loc[start:].index[:-h - 1]
+        days = px.index[:-h - 1]
+        days = days[(days >= pd.Timestamp(start)) & ((days <= pd.Timestamp(end)) if end else True)]
         for name, sig in signals.items():
             ev = (sig & valid).loc[days]
             n_day = ev.sum(axis=1)
