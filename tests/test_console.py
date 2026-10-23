@@ -116,6 +116,17 @@ class TestConsoleApi(unittest.TestCase):
         h = json.loads(self.pf.read_text(encoding='utf-8'))['holdings'][0]
         self.assertEqual((h['shares'], h['cost']), (204, 87.76))
 
+    def test_task_action_whitelist(self):
+        calls = []
+        ok = mock.Mock(returncode=0, stdout='', stderr='')
+        with mock.patch.object(console, '_ps', side_effect=lambda cmd, **k: calls.append(cmd) or ok):
+            self.assertEqual(self.client.post('/api/tasks/console/stop').status_code, 400)       # 不能停掉操作台自己
+            self.assertEqual(self.client.post('/api/tasks/evil;rm/run').status_code, 400)
+            self.assertEqual(self.client.post('/api/tasks/check_alerts/delete').status_code, 400)
+            self.assertEqual(self.client.post('/api/tasks/check_alerts/run').status_code, 200)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].startswith('Start-ScheduledTask') and "-TaskName 'check_alerts'" in calls[0])
+
     def test_job_rejects_unknown_kind(self):
         with mock.patch.object(console, 'external_lab_running', return_value=False):
             self.assertEqual(self.client.post('/api/jobs', json={'kind': 'shell', 'params': {}}).status_code, 400)

@@ -226,6 +226,36 @@ dialog.sheet[open] { display: flex; flex-direction: column; animation: rise .2s 
   white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); display: none; box-shadow: 0 6px 20px rgba(0, 0, 0, .25); line-height: 1.6; z-index: 2; }
 .chart .tip b { font-weight: 650; }
 
+/* ---------- 設定與排程 ---------- */
+.tasks td { white-space: nowrap; vertical-align: middle; } .tasks td.nm { white-space: normal; }
+.tasks .code { display: block; font-size: 11.5px; color: var(--muted); font-family: "JetBrains Mono", Consolas, monospace; }
+.pulse { display: inline-flex; align-items: center; gap: 7px; }
+.pulse::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+.mark-ok { color: var(--good); } .mark-bad { color: var(--bad); }
+.logbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.logbar select { width: auto; flex: 1 1 180px; }
+.logbar .check { margin: 0 4px 0 0; }
+.log { background: var(--code-bg); border-radius: 12px; padding: 10px 0; max-height: 420px; overflow: auto; font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 12.5px; line-height: 1.7; }
+.log div { padding: 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.log .ts { color: var(--muted); opacity: .75; margin-top: 6px; } .log .ok { color: var(--good); } .log .err { color: var(--bad); background: var(--bad-bg); }
+.log .warn { color: var(--warn); } .log .src { color: var(--accent); font-weight: 600; margin-right: 6px; }
+.log .empty { color: var(--muted); }
+.hform { display: flex; flex-direction: column; gap: 10px; }
+.hrow { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; background: var(--raised); }
+.hrow .hhead { display: flex; align-items: center; gap: 8px; }
+.hrow .hhead input { font-weight: 650; width: 110px; } .hrow .hhead .nm { flex: 1; }
+.hrow .hgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+.hrow label { margin: 0 0 3px; font-size: 11.5px; }
+.hrow input, .rform input { background: var(--panel); padding: 7px 10px; font-size: 14px; }
+.rform { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.jsonerr { margin-top: 8px; font-size: 13px; color: var(--bad); background: var(--bad-bg); padding: 8px 12px; border-radius: 10px; display: none; }
+.jsonerr.on { display: block; }
+.dirty { font-size: 12.5px; color: var(--warn); margin-left: 4px; }
+@media (max-width: 720px) { .hrow .hgrid, .rform { grid-template-columns: 1fr 1fr; } .tasks .hide-sm { display: none; } }
+.row > .col { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; }
+
 /* ---------- 手機 ---------- */
 @media (max-width: 720px) {
   header { flex-wrap: wrap; height: auto; padding: 10px 16px 0; gap: 6px 12px; }
@@ -501,20 +531,47 @@ dialog.sheet[open] { display: flex; flex-direction: column; animation: rise .2s 
 
 <section class="tab" id="tab-settings">
   <div class="row">
-    <div class="card">
-      <h2>排程<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
-      <p class="info-body">排程由 scripts\register_tasks.ps1 以系統管理員身分建立；停用請執行該腳本加 -Disable。console 是開機就啟動的操作台。</p>
-      <div class="scroll"><table id="st-tasks"></table></div>
-      <h2 style="margin-top:18px">最近排程輸出</h2>
-      <label>盤前簡報 logs\morning_brief.log</label><div class="md"><pre id="st-log-mb"></pre></div>
-      <label>持股提醒 logs\check_alerts.log</label><div class="md"><pre id="st-log-ca"></pre></div>
+    <div class="col">
+      <div class="card">
+        <div class="card-head"><h2 style="margin:0">排程與自動化<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+          <span class="hint" id="st-time" style="margin:0"></span>
+          <button class="b mini" style="margin-left:auto" onclick="loadStatus()">重新整理</button></div>
+        <p class="info-body">排程由 scripts\register_tasks.ps1 以系統管理員身分建立；停用請執行該腳本加 -Disable。
+          「▶ 執行」和每天自動執行完全相同（會推送到 Discord）；console 是開機就啟動的操作台本身，不能在這裡停止。</p>
+        <div class="scroll" style="margin-top:10px"><table class="tasks" id="st-tasks"></table></div>
+      </div>
+      <div class="card">
+        <h2>排程紀錄</h2>
+        <div class="logbar">
+          <select id="st-logsel" onchange="renderLog()"></select>
+          <label class="check"><input type="checkbox" id="st-onlyerr" onchange="renderLog()"> 只看錯誤與警告</label>
+        </div>
+        <div class="logbar" style="margin-top:-2px">
+          <button class="b mini" onclick="copyLog()">📋 複製</button>
+          <button class="b mini" onclick="clearLog()">🧹 清除畫面</button>
+          <span class="hint" style="margin:0">清除畫面不會刪除紀錄檔</span>
+        </div>
+        <div class="log" id="st-log"></div>
+      </div>
     </div>
-    <div class="card">
-      <h2>portfolio.json<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
-      <p class="info-body" style="margin-bottom:12px">持股、提醒規則、風險設定、觀察清單。儲存前會檢查格式與規則，舊版自動備份到 state\portfolio_backups\。欄位說明見 src\app\alerts\portfolio.py。</p>
-      <textarea id="pf-text" rows="24" spellcheck="false"></textarea>
-      <div class="btns"><button class="b primary" onclick="savePortfolio()">儲存</button><button class="b" onclick="loadPortfolio()">還原為目前檔案</button></div>
-      <div id="pf-msg" class="hint"></div>
+    <div class="col">
+      <div class="card">
+        <div class="card-head"><h2 style="margin:0">設定檔 portfolio.json<button class="info" onclick="info(this)" aria-label="說明">ⓘ</button></h2>
+          <span class="dirty" id="pf-dirty"></span></div>
+        <p class="info-body">持股、提醒規則、風險設定、觀察清單。表單模式只列常用欄位，其他設定（交易計畫、配置目標等）會原樣保留；
+          要改其他欄位請切到 JSON 模式。儲存前伺服器會再檢查格式與規則，舊版自動備份到 state\portfolio_backups\。</p>
+        <div class="seg" id="pf-seg" style="margin:12px 0 14px"><button data-mode="form" class="on">表單</button><button data-mode="json">JSON</button></div>
+        <div id="pf-form"></div>
+        <div id="pf-json" hidden>
+          <textarea id="pf-text" rows="24" spellcheck="false" oninput="pfJsonInput()"></textarea>
+          <div class="jsonerr" id="pf-err"></div>
+        </div>
+        <div class="btns">
+          <button class="b primary" id="pf-save" onclick="savePortfolio()" disabled>儲存</button>
+          <button class="b" id="pf-revert" onclick="revertPortfolio()" disabled>撤銷變更</button>
+        </div>
+        <div id="pf-msg" class="hint"></div>
+      </div>
     </div>
   </div>
 </section>
@@ -562,7 +619,11 @@ function gauge(dist) {
   const c = dist < 0.05 ? 'var(--bad)' : dist < 0.10 ? 'var(--warn)' : 'var(--good)';
   return `<span class="gauge"><span class="bar"><i style="width:${Math.max(4, Math.min(100, dist / 0.3 * 100))}%;background:${c}"></i></span>${(dist * 100).toFixed(1)}%</span>`;
 }
-const shortTime = t => { const m = String(t || '').match(/(\d{1,2})\/(\d{1,2})\/\d{4}\s+(\d{1,2}):(\d{2})/); return m ? `${m[1]}/${m[2]} ${m[3].padStart(2, '0')}:${m[4]}` : (t || '—'); };
+const shortTime = t => {
+  const s = String(t || ''); if (!s || s.startsWith('1999')) return '—';
+  let m = s.match(/^\d{4}-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); if (m) return `${+m[1]}/${+m[2]} ${m[3]}:${m[4]}`;
+  m = s.match(/(\d{1,2})\/(\d{1,2})\/\d{4}\s+(\d{1,2}):(\d{2})/); return m ? `${m[1]}/${m[2]} ${m[3].padStart(2, '0')}:${m[4]}` : s;
+};
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 5000); }
 
@@ -1050,38 +1111,160 @@ async function openReport(name, btn) {
 }
 
 // ---------- 設定 ----------
+const TASKS = [['morning_brief', '盤前簡報', '推送盤前簡報到 Discord'], ['paper_exec', '模擬成交', '用即時報價執行模擬單（推送到模擬帳戶頻道）'],
+  ['check_alerts', '持股提醒', '檢查持股並在有觸發時推送'], ['forward_test', '前瞻測試', '記錄今天的名單'],
+  ['sector_radar', '族群雷達', '重新計算族群雷達'], ['paper_bot', '模擬帳戶', '收盤記帳、排定下一個交易日的單並推送'], ['console', '操作台', '']];
+const NEVER_RUN = 267011, RUNNING = 267009;
+let statusCache = null;
 async function loadStatus() {
   const d = await api('/api/status').catch(e => ({error: e.message}));
-  if (!d.error) { statusCache = d; if ($('tab-brief').classList.contains('on')) loadBriefStatus(); }
   if (d.error) { $('st-tasks').innerHTML = `<tr><td class="err">${esc(d.error)}</td></tr>`; return; }
-  $('st-tasks').innerHTML = '<tr><th>工作</th><th>狀態</th><th>上次執行</th><th>結果</th><th>下次執行</th></tr>' + (d.tasks.length ? d.tasks.map(t =>
-    `<tr><td>${esc(t.name)}</td><td>${t.state === 'Ready' ? '<span class="tag ok">已啟用</span>' : `<span class="tag warn">${esc(t.state)}</span>`}</td>
-     <td>${esc(t.last)}</td><td>${t.result === 0 ? '成功' : esc(t.result)}</td><td>${esc(t.next)}</td></tr>`).join('') : '<tr><td colspan="5">沒有找到排程</td></tr>');
-  $('st-log-mb').textContent = d.logs.morning_brief.join('\n') || '（尚無紀錄）';
-  $('st-log-ca').textContent = d.logs.check_alerts.join('\n') || '（尚無紀錄）';
+  statusCache = d;
+  if ($('tab-brief').classList.contains('on')) loadBriefStatus();
   $('envbar').innerHTML = `<span title="Discord ${d.discord_configured ? '已設定' : '未設定'}"><i class="dot ${d.discord_configured ? 'ok' : 'bad'}"></i>Discord</span>
     <span title="${d.ollama ? 'Ollama：' + esc(d.ollama_model) : 'Ollama 未啟動'}"><i class="dot ${d.ollama ? 'ok' : 'bad'}"></i>本機模型</span>`;
+  const by = Object.fromEntries((d.tasks || []).map(t => [t.name, t]));
+  const state = t => t.state === 'Running' ? '<span class="tag warn pulse">執行中</span>' : t.state === 'Ready' ? '<span class="tag ok">已啟用</span>'
+    : t.state === 'Disabled' ? '<span class="tag bad">已停用</span>' : `<span class="tag warn">${esc(t.state)}</span>`;
+  const last = t => t.result === NEVER_RUN || !t.last || t.last.startsWith('1999') ? '—'
+    : `${shortTime(t.last)} ${t.result === 0 || t.result === RUNNING ? '<span class="mark-ok">✓</span>' : `<span class="mark-bad" title="結束代碼 ${esc(t.result)}">✗</span>`}`;
+  const rows = TASKS.filter(([n]) => by[n]).map(([n, label]) => { const t = by[n];
+    const act = n === 'console' ? '<span class="hint" style="margin:0">—</span>'
+      : t.state === 'Running' ? `<button class="b mini danger" onclick="taskAction('${n}', 'stop')">■ 停止</button>`
+      : `<button class="b mini" onclick="taskAction('${n}', 'run')" ${t.state === 'Disabled' ? 'disabled' : ''}>▶ 執行</button>`;
+    return `<tr><td class="nm">${label}<span class="code">${n}</span></td><td>${state(t)}</td>
+      <td><div>上次 ${last(t)}</div><div class="hint" style="margin:0">下次 ${shortTime(t.next)}</div></td><td class="num">${act}</td></tr>`; });
+  $('st-tasks').innerHTML = rows.length ? rows.join('') : '<tr><td class="hint">沒有找到排程（以系統管理員身分執行 scripts\\register_tasks.ps1 建立）</td></tr>';
+  $('st-time').textContent = '更新於 ' + new Date().toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  const sel = $('st-logsel');
+  if (!sel.options.length) sel.innerHTML = '<option value="__all">全部排程：只看錯誤與警告</option>'
+    + TASKS.filter(([n]) => n !== 'console').map(([n, l]) => `<option value="${n}" ${n === 'morning_brief' ? 'selected' : ''}>${l}（logs\\${n}.log）</option>`).join('');
+  renderLog();
+  clearTimeout(loadStatus._h);
+  if ((d.tasks || []).some(t => t.state === 'Running') && $('tab-settings').classList.contains('on')) loadStatus._h = setTimeout(loadStatus, 5000);
 }
-let statusCache = null;
 async function loadBriefStatus() {
   const d = statusCache || await api('/api/status').catch(() => null);
   if (!d || !d.tasks) return;
   for (const [id, name] of [['mb-badges', 'morning_brief'], ['ca-badges', 'check_alerts']]) {
     const t = d.tasks.find(x => x.name === name);
+    const ok = t && t.result === 0, never = t && (t.result === NEVER_RUN || shortTime(t.last) === '—');
     $(id).innerHTML = !t ? '<span class="badge bad">找不到排程</span>'
-      : `<span class="badge ${t.result === 0 ? 'ok' : 'bad'}">上次 <b>${esc(shortTime(t.last))}</b> ${t.result === 0 ? '成功' : '失敗'}</span>`
-        + `<span class="badge">下次 <b>${esc(shortTime(t.next))}</b></span>` + (t.state === 'Ready' ? '' : `<span class="badge bad">${esc(t.state)}</span>`);
+      : (never ? '<span class="badge">尚未執行過</span>' : `<span class="badge ${ok ? 'ok' : 'bad'}">上次 <b>${esc(shortTime(t.last))}</b> ${ok ? '成功' : '失敗'}</span>`)
+        + `<span class="badge">下次 <b>${esc(shortTime(t.next))}</b></span>` + (t.state === 'Ready' || t.state === 'Running' ? '' : `<span class="badge bad">${esc(t.state)}</span>`);
   }
 }
+async function taskAction(name, action) {
+  const [, label, what] = TASKS.find(t => t[0] === name);
+  if (!confirm(action === 'run' ? `立即執行「${label}」？\n和每天自動執行完全相同：${what}。` : `停止正在執行的「${label}」？`)) return;
+  try { await api(`/api/tasks/${name}/${action}`, {method: 'POST'}); toast(action === 'run' ? `已開始執行「${label}」` : `已停止「${label}」`); }
+  catch (e) { toast(e.message); }
+  setTimeout(loadStatus, 1500);
+}
+// 紀錄：依內容上色（錯誤紅、警告黃、成功綠、時間分隔線淡灰）
+function logClass(l) {
+  if (/^-----\s*exit\s+[1-9]/.test(l) || /traceback|error|exception|失敗|\[error\]/i.test(l)) return 'err';
+  if (/^(=====|-----)/.test(l)) return 'ts';
+  if (/\[warn\]|warning|⚠/i.test(l)) return 'warn';
+  if (/\[sent\]|\[ok\]|\[saved\]|已推送|成功/.test(l)) return 'ok';
+  return '';
+}
+const logCut = {};
+function logLines() {
+  const sel = val('st-logsel'), logs = (statusCache && statusCache.logs) || {};
+  if (sel === '__all') return Object.entries(logs).flatMap(([n, ls]) => ls.filter(l => ['err', 'warn'].includes(logClass(l))).map(l => [n, l]));
+  let ls = logs[sel] || [];
+  const cut = logCut[sel]; if (cut) { const i = ls.lastIndexOf(cut); if (i >= 0) ls = ls.slice(i + 1); }
+  if (ck('st-onlyerr')) ls = ls.filter(l => ['err', 'warn'].includes(logClass(l)));
+  return ls.map(l => [null, l]);
+}
+function renderLog() {
+  const lines = logLines(), box = $('st-log');
+  box.innerHTML = lines.length ? lines.map(([n, l]) => `<div class="${logClass(l)}">${n ? `<span class="src">${esc(TASKS.find(t => t[0] === n)[1])}</span>` : ''}${esc(l)}</div>`).join('')
+    : '<div class="empty">（沒有符合的紀錄）</div>';
+  box.scrollTop = box.scrollHeight;
+}
+function clearLog() { const sel = val('st-logsel'), ls = (statusCache?.logs || {})[sel]; if (ls?.length) logCut[sel] = ls[ls.length - 1]; renderLog(); }
+async function copyLog() {
+  const text = logLines().map(([n, l]) => (n ? `[${n}] ` : '') + l).join('\n');
+  try { await navigator.clipboard.writeText(text); }
+  catch (_) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast('已複製紀錄');
+}
+
+// ---------- 設定檔：表單模式／JSON 模式 ----------
+const pf = {orig: '', obj: null, mode: 'form', valid: true};
+const PCT = new Set(['stop_loss_pct', 'take_profit_pct', 'max_risk_per_trade', 'max_position_pct', 'max_total_risk']);
+const showNum = (k, v) => v == null ? '' : PCT.has(k) ? +(v * 100).toFixed(4) : v;
 async function loadPortfolio() {
-  const d = await api('/api/portfolio'); $('pf-text').value = d.text;
+  const d = await api('/api/portfolio');
+  pf.orig = d.text; pf.obj = JSON.parse(d.text); pf.valid = true;
+  $('pf-text').value = d.text; $('pf-err').classList.remove('on');
+  renderPfForm(); pfDirty();
   $('pf-msg').textContent = d.exists ? '' : '目前沒有 portfolio.json，顯示的是範例；儲存後才會建立。';
 }
+function renderPfForm() {
+  const o = pf.obj, r = o.risk || {};
+  const field = (path, k, v, label, mode = 'decimal') => `<div><label>${label}</label><input inputmode="${mode}" value="${esc(showNum(k, v))}" data-path="${path}" data-k="${k}" oninput="pfInput(this)"></div>`;
+  const extra = h => { const known = new Set(['symbol', 'name', 'shares', 'cost', 'stop_loss_pct', 'take_profit_pct']);
+    const n = Object.keys(h).filter(k => !known.has(k)); return n.length ? `<span class="tag" title="${esc(n.join('、'))}">另有 ${n.length} 項設定</span>` : ''; };
+  $('pf-form').innerHTML = `<h2 style="font-size:14px;margin:0 0 8px">持股</h2><div class="hform">` + (o.holdings || []).map((h, i) => `<div class="hrow">
+      <div class="hhead"><input value="${esc(h.symbol)}" data-path="holdings.${i}" data-k="symbol" oninput="pfInput(this)" placeholder="代號" aria-label="代號">
+        <input class="nm" value="${esc(h.name || '')}" data-path="holdings.${i}" data-k="name" oninput="pfInput(this)" placeholder="名稱" aria-label="名稱">
+        ${extra(h)}<button class="x" onclick="pfRemove(${i})" aria-label="刪除這檔">✕</button></div>
+      <div class="hgrid">${field(`holdings.${i}`, 'shares', h.shares, '股數')}${field(`holdings.${i}`, 'cost', h.cost, '成本')}
+        ${field(`holdings.${i}`, 'stop_loss_pct', h.stop_loss_pct, '停損 %（例 -15）')}${field(`holdings.${i}`, 'take_profit_pct', h.take_profit_pct, '停利 %（例 20）')}</div></div>`).join('')
+    + `</div><div class="btns" style="margin-top:10px"><button class="b mini" onclick="pfAdd()">＋ 新增持股</button></div>
+    <h2 style="font-size:14px;margin:20px 0 8px">個股操作的風險設定</h2><div class="rform">
+      ${field('risk', 'capital', r.capital, '操作資金（元）')}${field('risk', 'max_risk_per_trade', r.max_risk_per_trade, '每筆最多虧 %')}
+      ${field('risk', 'max_position_pct', r.max_position_pct, '單一個股上限 %')}${field('risk', 'max_total_risk', r.max_total_risk, '總風險上限 %')}</div>`;
+}
+function pfTarget(path) { return path.split('.').reduce((o, k) => (o[k] ??= {}), pf.obj); }
+function pfInput(el) {
+  const t = pfTarget(el.dataset.path), k = el.dataset.k, raw = el.value.trim();
+  if (k === 'symbol' || k === 'name') { if (k === 'name' && !raw) delete t[k]; else t[k] = k === 'symbol' ? raw.toUpperCase() : raw; }
+  else if (raw === '') delete t[k];
+  else if (!isNaN(+raw)) t[k] = PCT.has(k) ? +(+raw / 100).toFixed(6) : +raw;
+  pfDirty();
+}
+function pfAdd() { (pf.obj.holdings ||= []).push({symbol: '', shares: 0, cost: 0}); renderPfForm(); pfDirty(); }
+function pfRemove(i) { const h = pf.obj.holdings[i]; if (!confirm(`從設定檔移除 ${h.symbol || '這一檔'}？（要按「儲存」才會生效）`)) return; pf.obj.holdings.splice(i, 1); renderPfForm(); pfDirty(); }
+function pfJsonInput() {
+  const text = $('pf-text').value, err = $('pf-err');
+  try { pf.obj = JSON.parse(text); pf.valid = true; err.classList.remove('on'); }
+  catch (e) {
+    pf.valid = false;
+    const m = String(e.message).match(/position (\d+)/), pos = m ? +m[1] : null;
+    const where = pos == null ? '' : (() => { const before = text.slice(0, pos).split('\n'); return `第 ${before.length} 行第 ${before[before.length - 1].length + 1} 欄：`; })();
+    err.textContent = `⚠️ JSON 格式錯誤，${where}${e.message}（常見原因：少了逗號、引號或括號；最後一項後面多了逗號）`;
+    err.classList.add('on');
+  }
+  pfDirty();
+}
+function pfDirty() {
+  const dirty = !pf.valid || JSON.stringify(pf.obj) !== JSON.stringify(JSON.parse(pf.orig));
+  $('pf-dirty').textContent = dirty ? '● 有未儲存的變更' : '';
+  $('pf-save').disabled = !dirty || !pf.valid;
+  $('pf-revert').disabled = !dirty;
+}
+$('pf-seg').addEventListener('click', e => {
+  const mode = e.target.dataset.mode; if (!mode || mode === pf.mode) return;
+  if (mode === 'form' && !pf.valid) { toast('JSON 有格式錯誤，修正後才能切回表單'); return; }
+  if (mode === 'json') { $('pf-text').value = JSON.stringify(pf.obj, null, 2); } else renderPfForm();
+  pf.mode = mode;
+  document.querySelectorAll('#pf-seg button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  $('pf-form').hidden = mode !== 'form'; $('pf-json').hidden = mode !== 'json';
+});
+function revertPortfolio() { if (confirm('放棄所有未儲存的變更？')) loadPortfolio(); }
 async function savePortfolio() {
+  if (!pf.valid) return;
   if (!confirm('儲存 portfolio.json？舊版會自動備份。')) return;
-  try { const d = await api('/api/portfolio', {method: 'PUT', body: JSON.stringify({text: $('pf-text').value})});
-    $('pf-msg').innerHTML = '<span class="pos">已儲存</span>' + (d.backup ? `，舊版備份在 ${esc(d.backup)}` : ''); }
-  catch (e) { $('pf-msg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+  try {
+    const d = await api('/api/portfolio', {method: 'PUT', body: JSON.stringify({text: JSON.stringify(pf.obj, null, 2) + '\n'})});
+    toast('portfolio.json 已更新，舊版已備份');
+    $('pf-msg').textContent = d.backup ? `備份：${d.backup}` : '';
+    await loadPortfolio(); loadCodes();
+  } catch (e) { $('pf-msg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
 }
 
 // ---------- 啟動 ----------

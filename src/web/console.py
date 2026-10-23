@@ -372,15 +372,36 @@ def forward():
 
 # ---------- 排程與環境 ----------
 
+SCHEDULED = ('morning_brief', 'paper_exec', 'check_alerts', 'forward_test', 'sector_radar', 'paper_bot')   # 可手動執行／停止（不含 console 自己）
+
+
+def _ps(cmd: str, timeout: int = 20) -> subprocess.CompletedProcess:
+    return subprocess.run(['powershell', '-NoProfile', '-Command', cmd], capture_output=True, text=True,
+                          timeout=timeout, encoding='utf-8', creationflags=_no_window())
+
+
+@app.post('/api/tasks/{name}/{action}')
+def task_action(name: str, action: str):
+    """立即執行或停止某個排程（與每天自動執行完全相同，會推送）。名稱只接受固定清單。"""
+    if name not in SCHEDULED or action not in ('run', 'stop'):
+        raise HTTPException(400, '不支援的排程或動作')
+    verb = 'Start-ScheduledTask' if action == 'run' else 'Stop-ScheduledTask'
+    r = _ps(f"{verb} -TaskPath '\\stock_agent\\' -TaskName '{name}' -ErrorAction Stop")
+    if r.returncode != 0:
+        raise HTTPException(500, (r.stderr or r.stdout).strip()[:300] or '執行失敗')
+    return {'ok': True}
+
+
 @app.get('/api/status')
 def status():
     tasks = []
     try:
+        # 時間用 ISO 格式（不受 Windows 地區設定影響）；從未執行過的是 1999 年，前端顯示「—」
         ps = ("Get-ScheduledTask -TaskPath '\\stock_agent\\' -ErrorAction SilentlyContinue | ForEach-Object { "
               "$i = $_ | Get-ScheduledTaskInfo; [pscustomobject]@{name=$_.TaskName; state=[string]$_.State; "
-              "last=[string]$i.LastRunTime; next=[string]$i.NextRunTime; result=$i.LastTaskResult} } | ConvertTo-Json")
-        out = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True,
-                             timeout=20, encoding='utf-8', creationflags=_no_window()).stdout.strip()
+              "last=$(if ($i.LastRunTime) { $i.LastRunTime.ToString('s') } else { '' }); "
+              "next=$(if ($i.NextRunTime) { $i.NextRunTime.ToString('s') } else { '' }); result=$i.LastTaskResult} } | ConvertTo-Json")
+        out = _ps(ps).stdout.strip()
         if out:
             tasks = json.loads(out)
             tasks = tasks if isinstance(tasks, list) else [tasks]
@@ -394,7 +415,7 @@ def status():
         pass
     return {
         'tasks': tasks,
-        'logs': {n: _tail(LOGS / f'{n}.log', 30) for n in ('morning_brief', 'check_alerts')},
+        'logs': {n: _tail(LOGS / f'{n}.log', 120) for n in SCHEDULED},
         'discord_configured': bool(os.getenv('DISCORD_WEBHOOK_URL', '').strip()),   # 只回報有沒有設定，不回傳網址
         'ollama': ollama,
         'ollama_model': os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'),
