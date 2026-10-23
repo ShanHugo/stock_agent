@@ -78,6 +78,36 @@ def parse_tpex_quotes(js: dict) -> pd.DataFrame:
                          for r in t['data']])
 
 
+OHLC_FIELDS = {'twse': ('開盤價', '最高價', '最低價', '收盤價', '成交股數'), 'tpex': ('開盤', '最高', '最低', '收盤', '成交股數')}
+
+
+def parse_ohlc(market: str, js: dict) -> pd.DataFrame:
+    """每日行情 → code, open, high, low, close, volume（K 線研究用；quotes_day 的快取沒有最高、最低價）。"""
+    cols = ['code', 'open', 'high', 'low', 'close', 'volume']
+    t = _twse_table(js) if market == 'twse' else ((js.get('tables') or [None])[0])
+    if not t or not t.get('data'):
+        return _empty(cols)
+    f = [x.strip() for x in t['fields']]
+    idx = [f.index(k) for k in OHLC_FIELDS[market]]
+    return pd.DataFrame([[r[0].strip()] + [rs._num(r[i]) for i in idx] for r in t['data']], columns=cols)
+
+
+def ohlc_day(market: str, d: date) -> pd.DataFrame:
+    """某日全部股票開高低收與成交股數。休市回傳空表。快取在 ohlc/，與 quotes/ 分開。"""
+    path = CACHE / market / 'ohlc' / f'{d:%Y%m%d}.json'
+
+    def load():
+        if market == 'twse':
+            js = rs._get('https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX', host='twse',
+                         params={'date': f'{d:%Y%m%d}', 'type': 'ALLBUT0999', 'response': 'json'}).json()
+        else:
+            js = rs._get(f'{TPEX}/afterTrading/otc', host='tpex',
+                         params={'date': f'{d:%Y/%m/%d}', 'type': 'EW', 'response': 'json'}).json()
+        return parse_ohlc(market, js)
+
+    return rs._cached(path, _past(d), load)
+
+
 def quotes_day(market: str, d: date) -> pd.DataFrame:
     """某日全部股票收盤價與成交股數。休市回傳空表（過去日期的空表也會快取）。"""
     path = CACHE / market / 'quotes' / f'{d:%Y%m%d}.json'
@@ -303,8 +333,11 @@ def adjust_prices(close: pd.DataFrame, ev: pd.DataFrame) -> tuple[pd.DataFrame, 
         notes.append(f'{n} 個單日報酬超過漲跌幅限制且無除權息／減資紀錄，已視為股權變動歸零')
         ret = ret.mask(bad, 0.0)
         growth = (1 + ret.fillna(0.0)).cumprod()
-        base = adj.bfill().iloc[0]
-        adj = (growth * base).where(span)
+        # 以最後一個交易日的實際收盤為基準（與事件還原相同：最新價格不動、之前的價格調整）。
+        # 原本以第一天為基準，0050 拆股、國巨等股票最新還原價變成實際價的 3～4 倍，
+        # 每日模擬拿實際收盤比還原後的 120 日線就會判斷錯（2026-10-23 發現）。
+        last_raw = close.ffill().where(span).ffill().iloc[-1]
+        adj = (growth / growth.where(span).ffill().iloc[-1] * last_raw).where(span)
     return adj, notes
 
 

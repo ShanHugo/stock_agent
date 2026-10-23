@@ -390,6 +390,47 @@ def write_view(bot, cfg, s, start, bench, nm, now) -> None:
     (STATE / 'latest.json').write_text(json.dumps(view, ensure_ascii=False, indent=1, default=float), encoding='utf-8')
 
 
+SHADOW = STATE / 'shadow_market_filter.json'
+SHADOW_MA_DAYS = 200
+
+
+def market_weak(px: pd.DataFrame, d) -> tuple[bool, float | None, float | None]:
+    """大盤過濾（前瞻觀察，不影響模擬帳戶）：0050 收盤是否低於 200 日線。回傳 (是否偏弱, 0050 收盤, 200 日線)。"""
+    p = px['0050']
+    m = p.rolling(SHADOW_MA_DAYS, min_periods=SHADOW_MA_DAYS).mean()
+    c, a = p.get(d), m.get(d)
+    if c is None or a is None or pd.isna(c) or pd.isna(a):
+        return False, None, None
+    return bool(c < a), float(c), float(a)
+
+
+def run_shadow(saved_main: dict | None, main: Bot, days, px, step) -> dict | None:
+    """影子帳戶：與模擬帳戶同資金、同規則，唯一差別是 0050 低於 200 日線時不買新股。
+    2026-10-23 歷史回測：8 個起始日年化都比現行高，但 2018～2021 全輸（錯過 2020 疫情後反彈），
+    依事先訂的標準不採用，改成前瞻觀察。第一次建立時複製模擬帳戶當時的狀態（當時 0050 在 200 日線之上，兩者操作相同）。
+    兩邊同一天、同一檔、同方向的成交用模擬帳戶的實際成交價（09:30 零股五檔），其他用開盤價。"""
+    if SHADOW.exists():
+        shadow = json.loads(SHADOW.read_text(encoding='utf-8'))
+        bot = Bot.from_dict(shadow)
+        days = [d for d in days if d > pd.Timestamp(bot.last_date)] if bot.last_date else days
+    elif saved_main:
+        shadow = {'start': saved_main.get('start')}
+        bot = Bot.from_dict(saved_main)
+    else:
+        shadow = {}
+        bot = Bot.new(main.cfg)
+    weak_today = None
+    for d in days:
+        ds_ = d.strftime('%Y-%m-%d')
+        fills = {(t['code'], t['side']): t['price'] for t in main.trades if t.get('date') == ds_}
+        weak_today = market_weak(px, d)
+        step(bot, d, fills, block_buys=weak_today[0])
+    data = bot.to_dict()
+    data['start'] = shadow.get('start') or (days[0].strftime('%Y-%m-%d') if len(days) else None)
+    data['weak'] = weak_today if weak_today is not None else shadow.get('weak')
+    return data
+
+
 def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
     load_dotenv(_ROOT / '.env')
     if PAUSED.exists() and not (reset or dry_run):
@@ -417,28 +458,47 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
         bot = Bot.new(cfg)
         days = px.index[-1:]                       # 新帳戶：從最新一個交易日收盤後開始排單
     start_date = saved['start'] if saved else days[0].strftime('%Y-%m-%d')
-    executed = []
-    for d in days:
+    def step(b: Bot, d, fills: dict | None = None, block_buys: bool = False) -> list[dict]:
         ds_ = d.strftime('%Y-%m-%d')
         opens, closes = raw_quote(d, 'open'), raw_quote(d, 'close')
         get = lambda s: (lambda c: float(s[c]) if c in s.index and pd.notna(s[c]) and s[c] > 0 else None)
         i = px.index.get_loc(d)
         prev_closes = raw_quote(px.index[i - 1], 'close') if i > 0 else pd.Series(dtype=float)
-        sides = {o['code']: o['side'] for o in bot.pending}
+        sides = {o['code']: o['side'] for o in b.pending}
         # 09:30 沒執行到的單：以開盤價補成交，開盤漲停（≥ +9.5%）買不到、跌停（≤ -9.5%）賣不掉
-        executed += bot.execute(ds_, limit_gate(get(opens), get(prev_closes), sides))
-        bot.dividends(ds_, ev[ev['date'] == d])
-        bot.mark(ds_, get(closes))
+        gated = limit_gate(get(opens), get(prev_closes), sides)
+        price = gated if not fills else (lambda c: fills.get((c, sides.get(c))) or gated(c))
+        done = b.execute(ds_, price)
+        b.dividends(ds_, ev[ev['date'] == d])
+        b.mark(ds_, get(closes))
         members = [c for c in members_on(hist, d) if c in codes]
         # 停損、排單股數用當天原始收盤（與用原始開盤價設的停損一致）；均線用還原價
         raw = closes.reindex(codes).to_frame().T.set_axis([d])
-        bot.decide(ds_, make_context(d, raw, ma, latest, pos2, neg2, members))
+        ctx = make_context(d, raw, ma, latest, pos2, neg2, members)
+        if block_buys:
+            ctx.candidates = []
+        b.decide(ds_, ctx)
+        return done
+
+    executed = []
+    for d in days:
+        executed += step(bot, d)
+    shadow = None
+    if reset and not dry_run:
+        SHADOW.unlink(missing_ok=True)
+    try:
+        shadow = run_shadow(None if reset else saved, bot, days, px, step)
+    except Exception as e:      # noqa: BLE001 — 觀察用的影子帳戶出錯不影響模擬帳戶
+        print(f'[warn] 大盤過濾影子帳戶失敗：{e}')
     data = bot.to_dict()
     data['start'] = start_date
     data['updated'] = now.isoformat(timespec='seconds')
     STATE.mkdir(parents=True, exist_ok=True)
     if not dry_run:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+        if shadow:
+            shadow['updated'] = data['updated']
+            SHADOW.write_text(json.dumps(shadow, ensure_ascii=False, indent=1), encoding='utf-8')
 
     names = stock_names(ds, today)
     nm = lambda c: f"{c} {names.get(c, '')}".strip()
@@ -466,6 +526,16 @@ def run_daily(log, send: bool, reset: bool, dry_run: bool = False) -> int:
             seen = p.get('last_date') or p['entry_date']
             if (pd.Timestamp(bot.last_date) - pd.Timestamp(seen)).days >= 5:
                 L.append(f"  ⚠️ 自 {seen} 起沒有成交價（停牌或下市），模擬帳戶無法賣出，請自行確認這檔的狀況")
+    if shadow and shadow.get('weak') and shadow['weak'][1] is not None:
+        weak, c50, ma200 = shadow['weak']
+        sb = Bot.from_dict(shadow)
+        seq = sb.equity[-1]['equity'] if sb.equity else sb.cash
+        L.append(f"\n**前瞻觀察：大盤過濾**（0050 低於 {SHADOW_MA_DAYS} 日線時不買新股；只是觀察，不影響模擬帳戶）")
+        L.append(f"- 0050 收盤 {c50:,.2f}，{SHADOW_MA_DAYS} 日線 {ma200:,.2f}（{pct(c50 / ma200 - 1)}）："
+                 + ('**偏弱，影子帳戶今天不買新股**' if weak else '在線上，影子帳戶照常操作'))
+        L.append(f"- 影子帳戶淨值 {seq:,.0f} 元（模擬帳戶 {s['equity']:,.0f} 元，差 {seq - s['equity']:+,.0f}）")
+        if weak and any(o['side'] == 'buy' for o in bot.pending):
+            L.append('- 影子帳戶不會買：' + '、'.join(nm(o['code']) for o in bot.pending if o['side'] == 'buy'))
     L.append('_模擬操作，不是買賣建議；真實下單請自行判斷。成交假設：隔天 09:30 依盤中零股五檔（漲停買不到、跌停賣不掉；09:30 沒執行到則以開盤價），手續費 2.8 折（最低 1 元）。'
              + (f'漲到成本 +{cfg.breakeven_after:.0%} 後停損移到成本價。' if cfg.breakeven_after else '')
              + (f'同一族群最多 {cfg.max_per_theme} 檔。' if cfg.max_per_theme else '') + '_')

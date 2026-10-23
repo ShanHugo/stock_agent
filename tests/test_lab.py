@@ -236,6 +236,11 @@ class TestMarket(unittest.TestCase):
         self.assertTrue(adj.loc[idx[6]:, 'DEL'].isna().all())               # 下市後保持缺值
         self.assertAlmostEqual(r.loc[idx[7], 'ODD'], 0.0)                   # 超過漲跌幅且無紀錄 → 歸零
         self.assertTrue(any('超過漲跌幅' in n for n in notes))
+        # 最新價格要等於實際收盤（每日模擬拿實際收盤比還原均線；0050 拆股曾差 4 倍）
+        self.assertAlmostEqual(adj.loc[idx[9], 'ODD'], 30.0)
+        self.assertAlmostEqual(adj.loc[idx[0], 'ODD'], 30.0)
+        self.assertAlmostEqual(adj.loc[idx[9], 'DIV'], 100.0)              # 有異常跳動時其他股票也不受影響
+        self.assertAlmostEqual(adj.loc[idx[5], 'DEL'], 30.0)               # 下市股以最後交易日為基準
 
     def test_universe_includes_delisted_and_is_point_in_time(self):
         from unittest import mock
