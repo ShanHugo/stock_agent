@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import re
 import time
+import warnings
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -62,7 +63,10 @@ def _cached(path: Path, fresh: bool, loader):
     if path.exists():
         age = time.time() - path.stat().st_mtime
         if fresh or age < 86400:
-            return pd.read_json(io.StringIO(path.read_text(encoding='utf-8')), orient='split', dtype=False)
+            # pandas 猜不到日期格式時會逐筆解析並印出 UserWarning；結果相同，只是每天在排程紀錄留下一行雜訊
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', message='Could not infer format', category=UserWarning)
+                return pd.read_json(io.StringIO(path.read_text(encoding='utf-8')), orient='split', dtype=False)
     df = loader()
     if df.empty and not fresh:
         return df  # 可能只是尚未公布，不快取
